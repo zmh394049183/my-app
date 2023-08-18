@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -42,7 +42,7 @@ export function disableLogs(): void {
         value: disabledLog,
         writable: true,
       };
-      // $FlowFixMe[cannot-write] Flow thinks console is immutable.
+      // $FlowFixMe Flow thinks console is immutable.
       Object.defineProperties(console, {
         info: props,
         log: props,
@@ -68,7 +68,7 @@ export function reenableLogs(): void {
         enumerable: true,
         writable: true,
       };
-      // $FlowFixMe[cannot-write] Flow thinks console is immutable.
+      // $FlowFixMe Flow thinks console is immutable.
       Object.defineProperties(console, {
         log: {...props, value: prevLog},
         info: {...props, value: prevInfo},

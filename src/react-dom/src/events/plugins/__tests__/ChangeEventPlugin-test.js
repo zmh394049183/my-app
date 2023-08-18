@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,11 +12,9 @@
 let React;
 let ReactDOM;
 let ReactDOMClient;
+let ReactFeatureFlags;
 let Scheduler;
 let act;
-let waitForAll;
-let waitForDiscrete;
-let assertLog;
 
 const setUntrackedChecked = Object.getOwnPropertyDescriptor(
   HTMLInputElement.prototype,
@@ -38,19 +36,20 @@ describe('ChangeEventPlugin', () => {
 
   beforeEach(() => {
     jest.resetModules();
+    ReactFeatureFlags = require('shared/ReactFeatureFlags');
     // TODO pull this into helper method, reduce repetition.
     // mock the browser APIs which are used in schedule:
     // - calling 'window.postMessage' should actually fire postmessage handlers
     const originalAddEventListener = global.addEventListener;
     let postMessageCallback;
-    global.addEventListener = function (eventName, callback, useCapture) {
+    global.addEventListener = function(eventName, callback, useCapture) {
       if (eventName === 'message') {
         postMessageCallback = callback;
       } else {
         originalAddEventListener(eventName, callback, useCapture);
       }
     };
-    global.postMessage = function (messageKey, targetOrigin) {
+    global.postMessage = function(messageKey, targetOrigin) {
       const postMessageEvent = {source: window, data: messageKey};
       if (postMessageCallback) {
         postMessageCallback(postMessageEvent);
@@ -59,14 +58,8 @@ describe('ChangeEventPlugin', () => {
     React = require('react');
     ReactDOM = require('react-dom');
     ReactDOMClient = require('react-dom/client');
-    act = require('internal-test-utils').act;
+    act = require('jest-react').act;
     Scheduler = require('scheduler');
-
-    const InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
-    waitForDiscrete = InternalTestUtils.waitForDiscrete;
-    assertLog = InternalTestUtils.assertLog;
-
     container = document.createElement('div');
     document.body.appendChild(container);
   });
@@ -98,8 +91,13 @@ describe('ChangeEventPlugin', () => {
     node.dispatchEvent(new Event('input', {bubbles: true, cancelable: true}));
     node.dispatchEvent(new Event('change', {bubbles: true, cancelable: true}));
 
-    // There should be no React change events because the value stayed the same.
-    expect(called).toBe(0);
+    if (ReactFeatureFlags.disableInputAttributeSyncing) {
+      // TODO: figure out why. This might be a bug.
+      expect(called).toBe(1);
+    } else {
+      // There should be no React change events because the value stayed the same.
+      expect(called).toBe(0);
+    }
   });
 
   it('should consider initial text value to be current (capture)', () => {
@@ -117,44 +115,13 @@ describe('ChangeEventPlugin', () => {
     node.dispatchEvent(new Event('input', {bubbles: true, cancelable: true}));
     node.dispatchEvent(new Event('change', {bubbles: true, cancelable: true}));
 
-    // There should be no React change events because the value stayed the same.
-    expect(called).toBe(0);
-  });
-
-  it('should not invoke a change event for textarea same value', () => {
-    let called = 0;
-
-    function cb(e) {
-      called++;
-      expect(e.type).toBe('change');
+    if (ReactFeatureFlags.disableInputAttributeSyncing) {
+      // TODO: figure out why. This might be a bug.
+      expect(called).toBe(1);
+    } else {
+      // There should be no React change events because the value stayed the same.
+      expect(called).toBe(0);
     }
-
-    const node = ReactDOM.render(
-      <textarea onChange={cb} defaultValue="initial" />,
-      container,
-    );
-    node.dispatchEvent(new Event('input', {bubbles: true, cancelable: true}));
-    node.dispatchEvent(new Event('change', {bubbles: true, cancelable: true}));
-    // There should be no React change events because the value stayed the same.
-    expect(called).toBe(0);
-  });
-
-  it('should not invoke a change event for textarea same value (capture)', () => {
-    let called = 0;
-
-    function cb(e) {
-      called++;
-      expect(e.type).toBe('change');
-    }
-
-    const node = ReactDOM.render(
-      <textarea onChangeCapture={cb} defaultValue="initial" />,
-      container,
-    );
-    node.dispatchEvent(new Event('input', {bubbles: true, cancelable: true}));
-    node.dispatchEvent(new Event('change', {bubbles: true, cancelable: true}));
-    // There should be no React change events because the value stayed the same.
-    expect(called).toBe(0);
   });
 
   it('should consider initial checkbox checked=true to be current', () => {
@@ -505,7 +472,7 @@ describe('ChangeEventPlugin', () => {
     // https://github.com/facebook/react/issues/10196
     try {
       originalCreateElement = document.createElement;
-      document.createElement = function () {
+      document.createElement = function() {
         const node = originalCreateElement.apply(this, arguments);
         Object.defineProperty(node, 'value', {
           get() {},
@@ -530,7 +497,7 @@ describe('ChangeEventPlugin', () => {
   });
 
   describe('concurrent mode', () => {
-    it('text input', async () => {
+    it('text input', () => {
       const root = ReactDOMClient.createRoot(container);
       let input;
 
@@ -538,7 +505,7 @@ describe('ChangeEventPlugin', () => {
         state = {value: 'initial'};
         onChange = event => this.setState({value: event.target.value});
         render() {
-          Scheduler.log(`render: ${this.state.value}`);
+          Scheduler.unstable_yieldValue(`render: ${this.state.value}`);
           const controlledValue =
             this.state.value === 'changed' ? 'changed [!]' : this.state.value;
           return (
@@ -555,10 +522,10 @@ describe('ChangeEventPlugin', () => {
       // Initial mount. Test that this is async.
       root.render(<ControlledInput />);
       // Should not have flushed yet.
-      assertLog([]);
+      expect(Scheduler).toHaveYielded([]);
       expect(input).toBe(undefined);
       // Flush callbacks.
-      await waitForAll(['render: initial']);
+      expect(Scheduler).toFlushAndYield(['render: initial']);
       expect(input.value).toBe('initial');
 
       // Trigger a change event.
@@ -567,12 +534,12 @@ describe('ChangeEventPlugin', () => {
         new Event('input', {bubbles: true, cancelable: true}),
       );
       // Change should synchronously flush
-      assertLog(['render: changed']);
+      expect(Scheduler).toHaveYielded(['render: changed']);
       // Value should be the controlled value, not the original one
       expect(input.value).toBe('changed [!]');
     });
 
-    it('checkbox input', async () => {
+    it('checkbox input', () => {
       const root = ReactDOMClient.createRoot(container);
       let input;
 
@@ -582,7 +549,7 @@ describe('ChangeEventPlugin', () => {
           this.setState({checked: event.target.checked});
         };
         render() {
-          Scheduler.log(`render: ${this.state.checked}`);
+          Scheduler.unstable_yieldValue(`render: ${this.state.checked}`);
           const controlledValue = this.props.reverse
             ? !this.state.checked
             : this.state.checked;
@@ -600,10 +567,10 @@ describe('ChangeEventPlugin', () => {
       // Initial mount. Test that this is async.
       root.render(<ControlledInput reverse={false} />);
       // Should not have flushed yet.
-      assertLog([]);
+      expect(Scheduler).toHaveYielded([]);
       expect(input).toBe(undefined);
       // Flush callbacks.
-      await waitForAll(['render: false']);
+      expect(Scheduler).toFlushAndYield(['render: false']);
       expect(input.checked).toBe(false);
 
       // Trigger a change event.
@@ -611,23 +578,23 @@ describe('ChangeEventPlugin', () => {
         new MouseEvent('click', {bubbles: true, cancelable: true}),
       );
       // Change should synchronously flush
-      assertLog(['render: true']);
+      expect(Scheduler).toHaveYielded(['render: true']);
       expect(input.checked).toBe(true);
 
       // Now let's make sure we're using the controlled value.
       root.render(<ControlledInput reverse={true} />);
-      await waitForAll(['render: true']);
+      expect(Scheduler).toFlushAndYield(['render: true']);
 
       // Trigger another change event.
       input.dispatchEvent(
         new MouseEvent('click', {bubbles: true, cancelable: true}),
       );
       // Change should synchronously flush
-      assertLog(['render: true']);
+      expect(Scheduler).toHaveYielded(['render: true']);
       expect(input.checked).toBe(false);
     });
 
-    it('textarea', async () => {
+    it('textarea', () => {
       const root = ReactDOMClient.createRoot(container);
       let textarea;
 
@@ -635,7 +602,7 @@ describe('ChangeEventPlugin', () => {
         state = {value: 'initial'};
         onChange = event => this.setState({value: event.target.value});
         render() {
-          Scheduler.log(`render: ${this.state.value}`);
+          Scheduler.unstable_yieldValue(`render: ${this.state.value}`);
           const controlledValue =
             this.state.value === 'changed' ? 'changed [!]' : this.state.value;
           return (
@@ -652,10 +619,10 @@ describe('ChangeEventPlugin', () => {
       // Initial mount. Test that this is async.
       root.render(<ControlledTextarea />);
       // Should not have flushed yet.
-      assertLog([]);
+      expect(Scheduler).toHaveYielded([]);
       expect(textarea).toBe(undefined);
       // Flush callbacks.
-      await waitForAll(['render: initial']);
+      expect(Scheduler).toFlushAndYield(['render: initial']);
       expect(textarea.value).toBe('initial');
 
       // Trigger a change event.
@@ -664,12 +631,12 @@ describe('ChangeEventPlugin', () => {
         new Event('input', {bubbles: true, cancelable: true}),
       );
       // Change should synchronously flush
-      assertLog(['render: changed']);
+      expect(Scheduler).toHaveYielded(['render: changed']);
       // Value should be the controlled value, not the original one
       expect(textarea.value).toBe('changed [!]');
     });
 
-    it('parent of input', async () => {
+    it('parent of input', () => {
       const root = ReactDOMClient.createRoot(container);
       let input;
 
@@ -677,7 +644,7 @@ describe('ChangeEventPlugin', () => {
         state = {value: 'initial'};
         onChange = event => this.setState({value: event.target.value});
         render() {
-          Scheduler.log(`render: ${this.state.value}`);
+          Scheduler.unstable_yieldValue(`render: ${this.state.value}`);
           const controlledValue =
             this.state.value === 'changed' ? 'changed [!]' : this.state.value;
           return (
@@ -698,10 +665,10 @@ describe('ChangeEventPlugin', () => {
       // Initial mount. Test that this is async.
       root.render(<ControlledInput />);
       // Should not have flushed yet.
-      assertLog([]);
+      expect(Scheduler).toHaveYielded([]);
       expect(input).toBe(undefined);
       // Flush callbacks.
-      await waitForAll(['render: initial']);
+      expect(Scheduler).toFlushAndYield(['render: initial']);
       expect(input.value).toBe('initial');
 
       // Trigger a change event.
@@ -710,7 +677,7 @@ describe('ChangeEventPlugin', () => {
         new Event('input', {bubbles: true, cancelable: true}),
       );
       // Change should synchronously flush
-      assertLog(['render: changed']);
+      expect(Scheduler).toHaveYielded(['render: changed']);
       // Value should be the controlled value, not the original one
       expect(input.value).toBe('changed [!]');
     });
@@ -726,7 +693,7 @@ describe('ChangeEventPlugin', () => {
           this.setState({value: ''});
         };
         render() {
-          Scheduler.log(`render: ${this.state.value}`);
+          Scheduler.unstable_yieldValue(`render: ${this.state.value}`);
           const controlledValue =
             this.state.value === 'changed' ? 'changed [!]' : this.state.value;
           return (
@@ -744,10 +711,10 @@ describe('ChangeEventPlugin', () => {
       // Initial mount. Test that this is async.
       root.render(<ControlledInput />);
       // Should not have flushed yet.
-      assertLog([]);
+      expect(Scheduler).toHaveYielded([]);
       expect(input).toBe(undefined);
       // Flush callbacks.
-      await waitForAll(['render: initial']);
+      expect(Scheduler).toFlushAndYield(['render: initial']);
       expect(input.value).toBe('initial');
 
       // Trigger a click event
@@ -756,7 +723,8 @@ describe('ChangeEventPlugin', () => {
       );
 
       // Flush microtask queue.
-      await waitForDiscrete(['render: ']);
+      await null;
+      expect(Scheduler).toHaveYielded(['render: ']);
       expect(input.value).toBe('');
     });
 
@@ -778,12 +746,12 @@ describe('ChangeEventPlugin', () => {
         );
       }
 
-      await act(() => {
+      await act(async () => {
         root.render(<Foo />);
       });
       expect(container.textContent).toEqual('not hovered');
 
-      await act(() => {
+      await act(async () => {
         const mouseOverEvent = document.createEvent('MouseEvents');
         mouseOverEvent.initEvent('mouseover', true, true);
         target.current.dispatchEvent(mouseOverEvent);

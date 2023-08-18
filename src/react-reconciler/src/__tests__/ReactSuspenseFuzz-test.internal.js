@@ -10,7 +10,7 @@ const SEED = process.env.FUZZ_TEST_SEED || 'default';
 const prettyFormatPkg = require('pretty-format');
 
 function prettyFormat(thing) {
-  return prettyFormatPkg.format(thing, {
+  return prettyFormatPkg(thing, {
     plugins: [
       prettyFormatPkg.plugins.ReactElement,
       prettyFormatPkg.plugins.ReactTestComponent,
@@ -28,11 +28,9 @@ describe('ReactSuspenseFuzz', () => {
     Suspense = React.Suspense;
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('internal-test-utils').act;
+    act = require('jest-react').act;
     Random = require('random-seed');
   });
-
-  jest.setTimeout(20000);
 
   function createFuzzer() {
     const {useState, useContext, useLayoutEffect} = React;
@@ -59,6 +57,7 @@ describe('ReactSuspenseFuzz', () => {
             };
             const timeoutID = setTimeout(() => {
               pendingTasks.delete(task);
+              Scheduler.unstable_yieldValue(task.label);
               setStep(i + 1);
             }, remountAfter);
             pendingTasks.add(task);
@@ -88,6 +87,7 @@ describe('ReactSuspenseFuzz', () => {
             };
             const timeoutID = setTimeout(() => {
               pendingTasks.delete(task);
+              Scheduler.unstable_yieldValue(task.label);
               setStep([i + 1, suspendFor]);
             }, beginAfter);
             pendingTasks.add(task);
@@ -117,71 +117,78 @@ describe('ReactSuspenseFuzz', () => {
               setTimeout(() => {
                 cache.set(fullText, fullText);
                 pendingTasks.delete(task);
-                Scheduler.log(task.label);
+                Scheduler.unstable_yieldValue(task.label);
                 resolve();
               }, delay);
             },
           };
           cache.set(fullText, thenable);
-          Scheduler.log(`Suspended! [${fullText}]`);
+          Scheduler.unstable_yieldValue(`Suspended! [${fullText}]`);
           throw thenable;
         } else if (typeof resolvedText.then === 'function') {
           const thenable = resolvedText;
-          Scheduler.log(`Suspended! [${fullText}]`);
+          Scheduler.unstable_yieldValue(`Suspended! [${fullText}]`);
           throw thenable;
         }
       } else {
         resolvedText = fullText;
       }
 
-      Scheduler.log(resolvedText);
+      Scheduler.unstable_yieldValue(resolvedText);
       return resolvedText;
     }
 
-    async function testResolvedOutput(unwrappedChildren) {
+    function resolveAllTasks() {
+      Scheduler.unstable_flushAllWithoutAsserting();
+      let elapsedTime = 0;
+      while (pendingTasks && pendingTasks.size > 0) {
+        if ((elapsedTime += 1000) > 1000000) {
+          throw new Error('Something did not resolve properly.');
+        }
+        act(() => {
+          ReactNoop.batchedUpdates(() => {
+            jest.advanceTimersByTime(1000);
+          });
+        });
+        Scheduler.unstable_flushAllWithoutAsserting();
+      }
+    }
+
+    function testResolvedOutput(unwrappedChildren) {
       const children = (
         <Suspense fallback="Loading...">{unwrappedChildren}</Suspense>
       );
 
-      // Render the app multiple times: once without suspending (as if all the
-      // data was already preloaded), and then again with suspensey data.
       resetCache();
       const expectedRoot = ReactNoop.createRoot();
-      await act(() => {
-        expectedRoot.render(
-          <ShouldSuspendContext.Provider value={false}>
-            {children}
-          </ShouldSuspendContext.Provider>,
-        );
-      });
-
+      expectedRoot.render(
+        <ShouldSuspendContext.Provider value={false}>
+          {children}
+        </ShouldSuspendContext.Provider>,
+      );
+      resolveAllTasks();
       const expectedOutput = expectedRoot.getChildrenAsJSX();
 
-      resetCache();
+      gate(flags => {
+        resetCache();
+        ReactNoop.renderLegacySyncRoot(children);
+        resolveAllTasks();
+        const legacyOutput = ReactNoop.getChildrenAsJSX();
+        expect(legacyOutput).toEqual(expectedOutput);
+        ReactNoop.renderLegacySyncRoot(null);
 
-      const concurrentRootThatSuspends = ReactNoop.createRoot();
-      await act(() => {
-        concurrentRootThatSuspends.render(children);
+        // Observable behavior differs here in a way that's expected:
+        // If enableSuspenseLayoutEffectSemantics is enabled, layout effects are destroyed on re-suspend
+        // before larger 'beginAfter' timers have a chance to fire.
+        if (!flags.enableSuspenseLayoutEffectSemantics) {
+          resetCache();
+          const concurrentRoot = ReactNoop.createRoot();
+          concurrentRoot.render(children);
+          resolveAllTasks();
+          const concurrentOutput = concurrentRoot.getChildrenAsJSX();
+          expect(concurrentOutput).toEqual(expectedOutput);
+        }
       });
-
-      resetCache();
-
-      // Do it again in legacy mode.
-      const legacyRootThatSuspends = ReactNoop.createLegacyRoot();
-      await act(() => {
-        legacyRootThatSuspends.render(children);
-      });
-
-      // Now compare the final output. It should be the same.
-      expect(concurrentRootThatSuspends.getChildrenAsJSX()).toEqual(
-        expectedOutput,
-      );
-      expect(legacyRootThatSuspends.getChildrenAsJSX()).toEqual(expectedOutput);
-
-      // TODO: There are Scheduler logs in this test file but they were only
-      // added for debugging purposes; we don't make any assertions on them.
-      // Should probably just delete.
-      Scheduler.unstable_clearLog();
     }
 
     function pickRandomWeighted(rand, options) {
@@ -303,10 +310,10 @@ describe('ReactSuspenseFuzz', () => {
     return {Container, Text, testResolvedOutput, generateTestCase};
   }
 
-  it('basic cases', async () => {
+  it('basic cases', () => {
     // This demonstrates that the testing primitives work
     const {Container, Text, testResolvedOutput} = createFuzzer();
-    await testResolvedOutput(
+    testResolvedOutput(
       <Container updates={[{remountAfter: 150}]}>
         <Text
           text="Hi"
@@ -317,20 +324,18 @@ describe('ReactSuspenseFuzz', () => {
     );
   });
 
-  it(`generative tests (random seed: ${SEED})`, async () => {
+  it(`generative tests (random seed: ${SEED})`, () => {
     const {generateTestCase, testResolvedOutput} = createFuzzer();
 
     const rand = Random.create(SEED);
 
-    // If this is too large the test will time out. We use a scheduled CI
-    // workflow to run these tests with a random seed.
-    const NUMBER_OF_TEST_CASES = 250;
+    const NUMBER_OF_TEST_CASES = 500;
     const ELEMENTS_PER_CASE = 12;
 
     for (let i = 0; i < NUMBER_OF_TEST_CASES; i++) {
       const randomTestCase = generateTestCase(rand, ELEMENTS_PER_CASE);
       try {
-        await testResolvedOutput(randomTestCase);
+        testResolvedOutput(randomTestCase);
       } catch (e) {
         console.log(`
 Failed fuzzy test case:
@@ -346,9 +351,9 @@ Random seed is ${SEED}
   });
 
   describe('hard-coded cases', () => {
-    it('1', async () => {
+    it('1', () => {
       const {Text, testResolvedOutput} = createFuzzer();
-      await testResolvedOutput(
+      testResolvedOutput(
         <>
           <Text
             initialDelay={20}
@@ -367,9 +372,9 @@ Random seed is ${SEED}
       );
     });
 
-    it('2', async () => {
+    it('2', () => {
       const {Text, Container, testResolvedOutput} = createFuzzer();
-      await testResolvedOutput(
+      testResolvedOutput(
         <>
           <Suspense fallback="Loading...">
             <Text initialDelay={7200} text="A" />
@@ -385,9 +390,9 @@ Random seed is ${SEED}
       );
     });
 
-    it('3', async () => {
+    it('3', () => {
       const {Text, Container, testResolvedOutput} = createFuzzer();
-      await testResolvedOutput(
+      testResolvedOutput(
         <>
           <Suspense fallback="Loading...">
             <Text
@@ -419,9 +424,9 @@ Random seed is ${SEED}
       );
     });
 
-    it('4', async () => {
+    it('4', () => {
       const {Text, testResolvedOutput} = createFuzzer();
-      await testResolvedOutput(
+      testResolvedOutput(
         <React.Suspense fallback="Loading...">
           <React.Suspense>
             <React.Suspense>

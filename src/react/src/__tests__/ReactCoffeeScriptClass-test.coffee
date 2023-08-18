@@ -1,5 +1,5 @@
 ###
-Copyright (c) Meta Platforms, Inc. and affiliates.
+Copyright (c) Facebook, Inc. and its affiliates.
 
 This source code is licensed under the MIT license found in the
 LICENSE file in the root directory of this source tree.
@@ -10,8 +10,6 @@ React = null
 ReactDOM = null
 ReactDOMClient = null
 act = null
-
-featureFlags = require 'shared/ReactFeatureFlags'
 
 describe 'ReactCoffeeScriptClass', ->
   container = null
@@ -24,6 +22,7 @@ describe 'ReactCoffeeScriptClass', ->
     React = require 'react'
     ReactDOM = require 'react-dom'
     ReactDOMClient = require 'react-dom/client'
+    act = require('jest-react').act
     PropTypes = require 'prop-types'
     container = document.createElement 'div'
     root = ReactDOMClient.createRoot container
@@ -37,7 +36,7 @@ describe 'ReactCoffeeScriptClass', ->
         return React.createElement('div', className: this.props.name)
 
   test = (element, expectedTag, expectedClassName) ->
-    ReactDOM.flushSync ->
+    act ->
       root.render(element)
     expect(container.firstChild).not.toBeNull()
     expect(container.firstChild.tagName).toBe(expectedTag)
@@ -51,7 +50,7 @@ describe 'ReactCoffeeScriptClass', ->
     class Foo extends React.Component
     expect(->
       expect(->
-        ReactDOM.flushSync ->
+        act ->
           root.render React.createElement(Foo)
       ).toThrow()
     ).toErrorDev([
@@ -104,8 +103,7 @@ describe 'ReactCoffeeScriptClass', ->
 
     ref = React.createRef()
     test React.createElement(Foo, initialValue: 'foo', ref: ref), 'DIV', 'foo'
-    ReactDOM.flushSync ->
-      ref.current.changeState()
+    ref.current.changeState()
     test React.createElement(Foo), 'SPAN', 'bar'
 
   it 'sets initial state with value returned by static getDerivedStateFromProps', ->
@@ -131,9 +129,8 @@ describe 'ReactCoffeeScriptClass', ->
       getDerivedStateFromProps: ->
         {}
     expect(->
-      ReactDOM.flushSync ->
+      act ->
         root.render React.createElement(Foo, foo: 'foo')
-      return
     ).toErrorDev 'Foo: getDerivedStateFromProps() is defined as an instance method and will be ignored. Instead, declare it as a static method.'
 
   it 'warns if getDerivedStateFromError is not static', ->
@@ -143,9 +140,8 @@ describe 'ReactCoffeeScriptClass', ->
       getDerivedStateFromError: ->
         {}
     expect(->
-      ReactDOM.flushSync ->
+      act ->
         root.render React.createElement(Foo, foo: 'foo')
-      return
     ).toErrorDev 'Foo: getDerivedStateFromError() is defined as an instance method and will be ignored. Instead, declare it as a static method.'
 
   it 'warns if getSnapshotBeforeUpdate is static', ->
@@ -155,9 +151,8 @@ describe 'ReactCoffeeScriptClass', ->
     Foo.getSnapshotBeforeUpdate = () ->
       {}
     expect(->
-      ReactDOM.flushSync ->
+      act ->
         root.render React.createElement(Foo, foo: 'foo')
-      return
     ).toErrorDev 'Foo: getSnapshotBeforeUpdate() is defined as a static method and will be ignored. Instead, declare it as an instance method.'
 
   it 'warns if state not initialized before static getDerivedStateFromProps', ->
@@ -172,9 +167,8 @@ describe 'ReactCoffeeScriptClass', ->
         bar: 'bar'
       }
     expect(->
-      ReactDOM.flushSync ->
+      act ->
         root.render React.createElement(Foo, foo: 'foo')
-      return
     ).toErrorDev (
       '`Foo` uses `getDerivedStateFromProps` but its initial state is ' +
       'undefined. This is not recommended. Instead, define the initial state by ' +
@@ -218,37 +212,36 @@ describe 'ReactCoffeeScriptClass', ->
     test React.createElement(Foo, update: false), 'DIV', 'initial'
     test React.createElement(Foo, update: true), 'DIV', 'updated'
 
-  if !featureFlags.disableLegacyContext
-    it 'renders based on context in the constructor', ->
-      class Foo extends React.Component
-        @contextTypes:
-          tag: PropTypes.string
-          className: PropTypes.string
+  it 'renders based on context in the constructor', ->
+    class Foo extends React.Component
+      @contextTypes:
+        tag: PropTypes.string
+        className: PropTypes.string
 
-        constructor: (props, context) ->
-          super props, context
-          @state =
-            tag: context.tag
-            className: @context.className
+      constructor: (props, context) ->
+        super props, context
+        @state =
+          tag: context.tag
+          className: @context.className
 
-        render: ->
-          Tag = @state.tag
-          React.createElement Tag,
-            className: @state.className
+      render: ->
+        Tag = @state.tag
+        React.createElement Tag,
+          className: @state.className
 
-      class Outer extends React.Component
-        @childContextTypes:
-          tag: PropTypes.string
-          className: PropTypes.string
+    class Outer extends React.Component
+      @childContextTypes:
+        tag: PropTypes.string
+        className: PropTypes.string
 
-        getChildContext: ->
-          tag: 'span'
-          className: 'foo'
+      getChildContext: ->
+        tag: 'span'
+        className: 'foo'
 
-        render: ->
-          React.createElement Foo
+      render: ->
+        React.createElement Foo
 
-      test React.createElement(Outer), 'SPAN', 'foo'
+    test React.createElement(Outer), 'SPAN', 'foo'
 
   it 'renders only once when setting state in componentWillMount', ->
     renderCount = 0
@@ -264,7 +257,9 @@ describe 'ReactCoffeeScriptClass', ->
         React.createElement('span', className: @state.bar)
 
     test React.createElement(Foo, initialValue: 'foo'), 'SPAN', 'bar'
-    expect(renderCount).toBe(1)
+    # This is broken with deferRenderPhaseUpdateToNextBatch flag on.
+    # We can't use the gate feature here because this test is also in CoffeeScript and TypeScript.
+    expect(renderCount).toBe(if global.__WWW__ and !global.__VARIANT__ then 2 else 1)
 
   it 'should warn with non-object in the initial state property', ->
     [['an array'], 'a string', 1234].forEach (state) ->
@@ -304,7 +299,7 @@ describe 'ReactCoffeeScriptClass', ->
         )
 
     test React.createElement(Foo, initialValue: 'foo'), 'DIV', 'foo'
-    ReactDOM.flushSync ->
+    act ->
       attachedListener()
     expect(renderedName).toBe 'bar'
 
@@ -341,7 +336,7 @@ describe 'ReactCoffeeScriptClass', ->
         )
 
     test React.createElement(Foo, initialValue: 'foo'), 'DIV', 'foo'
-    ReactDOM.flushSync ->
+    act ->
       attachedListener()
     expect(renderedName).toBe 'bar'
 
@@ -392,45 +387,44 @@ describe 'ReactCoffeeScriptClass', ->
       'did-update',    { value: 'foo' }, {}
     ]
     lifeCycles = [] # reset
-    ReactDOM.flushSync ->
+    act ->
       root.unmount()
     expect(lifeCycles).toEqual ['will-unmount']
 
-  if !featureFlags.disableLegacyContext
-    it 'warns when classic properties are defined on the instance,
-        but does not invoke them.', ->
-      getInitialStateWasCalled = false
-      getDefaultPropsWasCalled = false
-      class Foo extends React.Component
-        constructor: ->
-          @contextTypes = {}
-          @contextType = {}
-          @propTypes = {}
+  it 'warns when classic properties are defined on the instance,
+      but does not invoke them.', ->
+    getInitialStateWasCalled = false
+    getDefaultPropsWasCalled = false
+    class Foo extends React.Component
+      constructor: ->
+        @contextTypes = {}
+        @contextType = {}
+        @propTypes = {}
 
-        getInitialState: ->
-          getInitialStateWasCalled = true
-          {}
+      getInitialState: ->
+        getInitialStateWasCalled = true
+        {}
 
-        getDefaultProps: ->
-          getDefaultPropsWasCalled = true
-          {}
+      getDefaultProps: ->
+        getDefaultPropsWasCalled = true
+        {}
 
-        render: ->
-          React.createElement('span',
-            className: 'foo'
-          )
+      render: ->
+        React.createElement('span',
+          className: 'foo'
+        )
 
-      expect(->
-        test React.createElement(Foo), 'SPAN', 'foo'
-      ).toErrorDev([
-        'getInitialState was defined on Foo, a plain JavaScript class.',
-        'getDefaultProps was defined on Foo, a plain JavaScript class.',
-        'propTypes was defined as an instance property on Foo.',
-        'contextTypes was defined as an instance property on Foo.',
-        'contextType was defined as an instance property on Foo.',
-      ])
-      expect(getInitialStateWasCalled).toBe false
-      expect(getDefaultPropsWasCalled).toBe false
+    expect(->
+      test React.createElement(Foo), 'SPAN', 'foo'
+    ).toErrorDev([
+      'getInitialState was defined on Foo, a plain JavaScript class.',
+      'getDefaultProps was defined on Foo, a plain JavaScript class.',
+      'propTypes was defined as an instance property on Foo.',
+      'contextTypes was defined as an instance property on Foo.',
+      'contextType was defined as an instance property on Foo.',
+    ])
+    expect(getInitialStateWasCalled).toBe false
+    expect(getDefaultPropsWasCalled).toBe false
 
   it 'does not warn about getInitialState() on class components
       if state is also defined.', ->
@@ -517,25 +511,24 @@ describe 'ReactCoffeeScriptClass', ->
       {withoutStack: true}
     )
 
-  if !featureFlags.disableLegacyContext
-    it 'supports this.context passed via getChildContext', ->
-      class Bar extends React.Component
-        @contextTypes:
-          bar: PropTypes.string
-        render: ->
-          React.createElement('div', className: @context.bar)
+  it 'supports this.context passed via getChildContext', ->
+    class Bar extends React.Component
+      @contextTypes:
+        bar: PropTypes.string
+      render: ->
+        React.createElement('div', className: @context.bar)
 
-      class Foo extends React.Component
-        @childContextTypes:
-          bar: PropTypes.string
-        getChildContext: ->
-          bar: 'bar-through-context'
-        render: ->
-          React.createElement Bar
+    class Foo extends React.Component
+      @childContextTypes:
+        bar: PropTypes.string
+      getChildContext: ->
+        bar: 'bar-through-context'
+      render: ->
+        React.createElement Bar
 
-      test React.createElement(Foo), 'DIV', 'bar-through-context'
+    test React.createElement(Foo), 'DIV', 'bar-through-context'
 
-  it 'supports string refs', ->
+  it 'supports classic refs', ->
     class Foo extends React.Component
       render: ->
         React.createElement(InnerComponent,
@@ -544,15 +537,7 @@ describe 'ReactCoffeeScriptClass', ->
         )
 
     ref = React.createRef()
-    expect(->
-      test(React.createElement(Foo, ref: ref), 'DIV', 'foo')
-    ).toErrorDev([
-      'Warning: Component "Foo" contains the string ref "inner". ' +
-        'Support for string refs will be removed in a future major release. ' +
-        'We recommend using useRef() or createRef() instead. ' +
-        'Learn more about using refs safely here: https://reactjs.org/link/strict-mode-string-ref\n' +
-        '    in Foo (at **)'
-    ]);
+    test(React.createElement(Foo, ref: ref), 'DIV', 'foo')
     expect(ref.current.refs.inner.getName()).toBe 'foo'
 
   it 'supports drilling through to the DOM using findDOMNode', ->

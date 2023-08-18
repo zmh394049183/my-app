@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,18 +12,15 @@
 
 let React;
 let ReactNoop;
-let act;
 
 describe('ReactIncrementalUpdatesMinimalism', () => {
   beforeEach(() => {
     jest.resetModules();
     React = require('react');
     ReactNoop = require('react-noop-renderer');
-
-    act = require('internal-test-utils').act;
   });
 
-  it('should render a simple component', async () => {
+  it('should render a simple component', () => {
     function Child() {
       return <div>Hello World</div>;
     }
@@ -32,20 +29,20 @@ describe('ReactIncrementalUpdatesMinimalism', () => {
       return <Child />;
     }
 
-    ReactNoop.startTrackingHostCounters();
-    await act(() => ReactNoop.render(<Parent />));
-    expect(ReactNoop.stopTrackingHostCounters()).toEqual({
+    ReactNoop.render(<Parent />);
+    expect(ReactNoop.flushWithHostCounters()).toEqual({
+      hostDiffCounter: 0,
       hostUpdateCounter: 0,
     });
 
-    ReactNoop.startTrackingHostCounters();
-    await act(() => ReactNoop.render(<Parent />));
-    expect(ReactNoop.stopTrackingHostCounters()).toEqual({
+    ReactNoop.render(<Parent />);
+    expect(ReactNoop.flushWithHostCounters()).toEqual({
+      hostDiffCounter: 1,
       hostUpdateCounter: 1,
     });
   });
 
-  it('should not diff referentially equal host elements', async () => {
+  it('should not diff referentially equal host elements', () => {
     function Leaf(props) {
       return (
         <span>
@@ -70,20 +67,20 @@ describe('ReactIncrementalUpdatesMinimalism', () => {
       return <Child />;
     }
 
-    ReactNoop.startTrackingHostCounters();
-    await act(() => ReactNoop.render(<Parent />));
-    expect(ReactNoop.stopTrackingHostCounters()).toEqual({
+    ReactNoop.render(<Parent />);
+    expect(ReactNoop.flushWithHostCounters()).toEqual({
+      hostDiffCounter: 0,
       hostUpdateCounter: 0,
     });
 
-    ReactNoop.startTrackingHostCounters();
-    await act(() => ReactNoop.render(<Parent />));
-    expect(ReactNoop.stopTrackingHostCounters()).toEqual({
+    ReactNoop.render(<Parent />);
+    expect(ReactNoop.flushWithHostCounters()).toEqual({
+      hostDiffCounter: 0,
       hostUpdateCounter: 0,
     });
   });
 
-  it('should not diff parents of setState targets', async () => {
+  it('should not diff parents of setState targets', () => {
     let childInst;
 
     function Leaf(props) {
@@ -121,15 +118,18 @@ describe('ReactIncrementalUpdatesMinimalism', () => {
       );
     }
 
-    ReactNoop.startTrackingHostCounters();
-    await act(() => ReactNoop.render(<Parent />));
-    expect(ReactNoop.stopTrackingHostCounters()).toEqual({
+    ReactNoop.render(<Parent />);
+    expect(ReactNoop.flushWithHostCounters()).toEqual({
+      hostDiffCounter: 0,
       hostUpdateCounter: 0,
     });
 
-    ReactNoop.startTrackingHostCounters();
-    await act(() => childInst.setState({name: 'Robin'}));
-    expect(ReactNoop.stopTrackingHostCounters()).toEqual({
+    childInst.setState({name: 'Robin'});
+    expect(ReactNoop.flushWithHostCounters()).toEqual({
+      // Child > div
+      // Child > Leaf > span
+      // Child > Leaf > span > b
+      hostDiffCounter: 3,
       // Child > div
       // Child > Leaf > span
       // Child > Leaf > span > b
@@ -137,9 +137,8 @@ describe('ReactIncrementalUpdatesMinimalism', () => {
       hostUpdateCounter: 4,
     });
 
-    ReactNoop.startTrackingHostCounters();
-    await act(() => ReactNoop.render(<Parent />));
-    expect(ReactNoop.stopTrackingHostCounters()).toEqual({
+    ReactNoop.render(<Parent />);
+    expect(ReactNoop.flushWithHostCounters()).toEqual({
       // Parent > section
       // Parent > section > div
       // Parent > section > div > Leaf > span
@@ -150,6 +149,7 @@ describe('ReactIncrementalUpdatesMinimalism', () => {
       // Parent > section > div > hr
       // Parent > section > div > Leaf > span
       // Parent > section > div > Leaf > span > b
+      hostDiffCounter: 10,
       hostUpdateCounter: 10,
     });
   });

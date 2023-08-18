@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -15,11 +15,13 @@ let React;
 let ReactDOMFizzServer;
 let Suspense;
 
-describe('ReactDOMFizzServerNode', () => {
+describe('ReactDOMFizzServer', () => {
   beforeEach(() => {
     jest.resetModules();
     React = require('react');
-    ReactDOMFizzServer = require('react-dom/server');
+    if (__EXPERIMENTAL__) {
+      ReactDOMFizzServer = require('react-dom/server');
+    }
     Stream = require('stream');
     Suspense = React.Suspense;
   });
@@ -54,6 +56,7 @@ describe('ReactDOMFizzServerNode', () => {
     throw theInfinitePromise;
   }
 
+  // @gate experimental
   it('should call renderToPipeableStream', () => {
     const {writable, output} = getTestWritable();
     const {pipe} = ReactDOMFizzServer.renderToPipeableStream(
@@ -64,6 +67,7 @@ describe('ReactDOMFizzServerNode', () => {
     expect(output.result).toMatchInlineSnapshot(`"<div>hello world</div>"`);
   });
 
+  // @gate experimental
   it('should emit DOCTYPE at the root of the document', () => {
     const {writable, output} = getTestWritable();
     const {pipe} = ReactDOMFizzServer.renderToPipeableStream(
@@ -73,18 +77,12 @@ describe('ReactDOMFizzServerNode', () => {
     );
     pipe(writable);
     jest.runAllTimers();
-    if (gate(flags => flags.enableFloat)) {
-      // with Float, we emit empty heads if they are elided when rendering <html>
-      expect(output.result).toMatchInlineSnapshot(
-        `"<!DOCTYPE html><html><head></head><body>hello world</body></html>"`,
-      );
-    } else {
-      expect(output.result).toMatchInlineSnapshot(
-        `"<!DOCTYPE html><html><body>hello world</body></html>"`,
-      );
-    }
+    expect(output.result).toMatchInlineSnapshot(
+      `"<!DOCTYPE html><html><body>hello world</body></html>"`,
+    );
   });
 
+  // @gate experimental
   it('should emit bootstrap script src at the end', () => {
     const {writable, output} = getTestWritable();
     const {pipe} = ReactDOMFizzServer.renderToPipeableStream(
@@ -98,10 +96,11 @@ describe('ReactDOMFizzServerNode', () => {
     pipe(writable);
     jest.runAllTimers();
     expect(output.result).toMatchInlineSnapshot(
-      `"<link rel="preload" href="init.js" as="script" fetchPriority="low"/><link rel="modulepreload" href="init.mjs" fetchPriority="low"/><div>hello world</div><script>INIT();</script><script src="init.js" async=""></script><script type="module" src="init.mjs" async=""></script>"`,
+      `"<div>hello world</div><script>INIT();</script><script src=\\"init.js\\" async=\\"\\"></script><script type=\\"module\\" src=\\"init.mjs\\" async=\\"\\"></script>"`,
     );
   });
 
+  // @gate experimental
   it('should start writing after pipe', () => {
     const {writable, output} = getTestWritable();
     const {pipe} = ReactDOMFizzServer.renderToPipeableStream(
@@ -118,6 +117,7 @@ describe('ReactDOMFizzServerNode', () => {
     );
   });
 
+  // @gate experimental
   it('emits all HTML as one unit if we wait until the end to start', async () => {
     let hasLoaded = false;
     let resolve;
@@ -165,6 +165,7 @@ describe('ReactDOMFizzServerNode', () => {
     );
   });
 
+  // @gate experimental
   it('should error the stream when an error is thrown at the root', async () => {
     const reportedErrors = [];
     const reportedShellErrors = [];
@@ -173,6 +174,7 @@ describe('ReactDOMFizzServerNode', () => {
       <div>
         <Throw />
       </div>,
+
       {
         onError(x) {
           reportedErrors.push(x);
@@ -195,6 +197,7 @@ describe('ReactDOMFizzServerNode', () => {
     expect(reportedShellErrors).toEqual([theError]);
   });
 
+  // @gate experimental
   it('should error the stream when an error is thrown inside a fallback', async () => {
     const reportedErrors = [];
     const reportedShellErrors = [];
@@ -228,6 +231,7 @@ describe('ReactDOMFizzServerNode', () => {
     expect(reportedShellErrors).toEqual([theError]);
   });
 
+  // @gate experimental
   it('should not error the stream when an error is thrown inside suspense boundary', async () => {
     const reportedErrors = [];
     const reportedShellErrors = [];
@@ -238,6 +242,7 @@ describe('ReactDOMFizzServerNode', () => {
           <Throw />
         </Suspense>
       </div>,
+
       {
         onError(x) {
           reportedErrors.push(x);
@@ -258,6 +263,7 @@ describe('ReactDOMFizzServerNode', () => {
     expect(reportedShellErrors).toEqual([]);
   });
 
+  // @gate experimental
   it('should not attempt to render the fallback if the main content completes first', async () => {
     const {writable, output, completed} = getTestWritable();
 
@@ -283,6 +289,7 @@ describe('ReactDOMFizzServerNode', () => {
     expect(renderedFallback).toBe(false);
   });
 
+  // @gate experimental
   it('should be able to complete by aborting even if the promise never resolves', async () => {
     let isCompleteCalls = 0;
     const errors = [];
@@ -293,6 +300,7 @@ describe('ReactDOMFizzServerNode', () => {
           <InfiniteSuspend />
         </Suspense>
       </div>,
+
       {
         onError(x) {
           errors.push(x.message);
@@ -319,49 +327,7 @@ describe('ReactDOMFizzServerNode', () => {
     expect(isCompleteCalls).toBe(1);
   });
 
-  it('should fail the shell if you abort before work has begun', async () => {
-    let isCompleteCalls = 0;
-    const errors = [];
-    const shellErrors = [];
-    const {writable, output, completed} = getTestWritable();
-    const {pipe, abort} = ReactDOMFizzServer.renderToPipeableStream(
-      <div>
-        <Suspense fallback={<div>Loading</div>}>
-          <InfiniteSuspend />
-        </Suspense>
-      </div>,
-      {
-        onError(x) {
-          errors.push(x.message);
-        },
-        onShellError(x) {
-          shellErrors.push(x.message);
-        },
-        onAllReady() {
-          isCompleteCalls++;
-        },
-      },
-    );
-    pipe(writable);
-
-    // Currently we delay work so if we abort, we abort the remaining CPU
-    // work as well.
-
-    // Abort before running the timers that perform the work
-    const theReason = new Error('uh oh');
-    abort(theReason);
-
-    jest.runAllTimers();
-
-    await completed;
-
-    expect(errors).toEqual(['uh oh']);
-    expect(shellErrors).toEqual(['uh oh']);
-    expect(output.error).toBe(theReason);
-    expect(output.result).toBe('');
-    expect(isCompleteCalls).toBe(0);
-  });
-
+  // @gate experimental
   it('should be able to complete by abort when the fallback is also suspended', async () => {
     let isCompleteCalls = 0;
     const errors = [];
@@ -374,6 +340,7 @@ describe('ReactDOMFizzServerNode', () => {
           </Suspense>
         </Suspense>
       </div>,
+
       {
         onError(x) {
           errors.push(x.message);
@@ -404,6 +371,7 @@ describe('ReactDOMFizzServerNode', () => {
     expect(isCompleteCalls).toBe(1);
   });
 
+  // @gate experimental
   it('should be able to get context value when promise resolves', async () => {
     class DelayClient {
       get() {
@@ -454,6 +422,7 @@ describe('ReactDOMFizzServerNode', () => {
     expect(output.result).toContain('OK');
   });
 
+  // @gate experimental
   it('should be able to get context value when calls renderToPipeableStream twice at the same time', async () => {
     class DelayClient {
       get() {
@@ -528,6 +497,7 @@ describe('ReactDOMFizzServerNode', () => {
     expect(output1.result).toContain('OK');
   });
 
+  // @gate experimental
   it('should be able to pop context after suspending', async () => {
     class DelayClient {
       get() {
@@ -585,6 +555,7 @@ describe('ReactDOMFizzServerNode', () => {
     expect(output.result).toContain('OK');
   });
 
+  // @gate experimental
   it('should not continue rendering after the writable ends unexpectedly', async () => {
     let hasLoaded = false;
     let resolve;
@@ -634,18 +605,5 @@ describe('ReactDOMFizzServerNode', () => {
     ]);
     expect(rendered).toBe(false);
     expect(isComplete).toBe(true);
-  });
-
-  it('should encode multibyte characters correctly without nulls (#24985)', () => {
-    const {writable, output} = getTestWritable();
-    const {pipe} = ReactDOMFizzServer.renderToPipeableStream(
-      <div>{Array(700).fill('ののの')}</div>,
-    );
-    pipe(writable);
-    jest.runAllTimers();
-    expect(output.result.indexOf('\u0000')).toBe(-1);
-    expect(output.result).toEqual(
-      '<div>' + Array(700).fill('ののの').join('<!-- -->') + '</div>',
-    );
   });
 });

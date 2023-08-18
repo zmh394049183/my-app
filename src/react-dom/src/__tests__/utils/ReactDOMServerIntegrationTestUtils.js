@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,14 +12,14 @@
 const stream = require('stream');
 const shouldIgnoreConsoleError = require('../../../../../scripts/jest/shouldIgnoreConsoleError');
 
-module.exports = function (initModules) {
+module.exports = function(initModules) {
   let ReactDOM;
   let ReactDOMServer;
   let act;
 
   function resetModules() {
     ({ReactDOM, ReactDOMServer} = initModules());
-    act = require('internal-test-utils').act;
+    act = require('jest-react').act;
   }
 
   function shouldUseDocument(reactElement) {
@@ -48,37 +48,38 @@ module.exports = function (initModules) {
   // ====================================
 
   // promisified version of ReactDOM.render()
-  async function asyncReactDOMRender(reactElement, domElement, forceHydrate) {
-    if (forceHydrate) {
-      await act(() => {
-        ReactDOM.hydrate(reactElement, domElement);
-      });
-    } else {
-      await act(() => {
-        ReactDOM.render(reactElement, domElement);
-      });
-    }
+  function asyncReactDOMRender(reactElement, domElement, forceHydrate) {
+    return new Promise(resolve => {
+      if (forceHydrate) {
+        act(() => {
+          ReactDOM.hydrate(reactElement, domElement);
+        });
+      } else {
+        act(() => {
+          ReactDOM.render(reactElement, domElement);
+        });
+      }
+      // We can't use the callback for resolution because that will not catch
+      // errors. They're thrown.
+      resolve();
+    });
   }
   // performs fn asynchronously and expects count errors logged to console.error.
   // will fail the test if the count of errors logged is not equal to count.
   async function expectErrors(fn, count) {
-    if (console.error.mockClear) {
-      console.error.mockClear();
+    if (console.error.calls && console.error.calls.reset) {
+      console.error.calls.reset();
     } else {
       // TODO: Rewrite tests that use this helper to enumerate expected errors.
       // This will enable the helper to use the .toErrorDev() matcher instead of spying.
-      spyOnDev(console, 'error').mockImplementation(() => {});
+      spyOnDev(console, 'error');
     }
 
     const result = await fn();
-    if (
-      console.error.mock &&
-      console.error.mock.calls &&
-      console.error.mock.calls.length !== 0
-    ) {
+    if (console.error.calls && console.error.calls.count() !== 0) {
       const filteredWarnings = [];
-      for (let i = 0; i < console.error.mock.calls.length; i++) {
-        const args = console.error.mock.calls[i];
+      for (let i = 0; i < console.error.calls.count(); i++) {
+        const args = console.error.calls.argsFor(i);
         const [format, ...rest] = args;
         if (!shouldIgnoreConsoleError(format, rest)) {
           filteredWarnings.push(args);
@@ -240,10 +241,8 @@ module.exports = function (initModules) {
     if (shouldUseDocument(element)) {
       // We can't render into a document during a clean render,
       // so instead, we'll render the children into the document element.
-      cleanContainer = getContainerFromMarkup(
-        element,
-        '<html></html>',
-      ).documentElement;
+      cleanContainer = getContainerFromMarkup(element, '<html></html>')
+        .documentElement;
       element = element.props.children;
     } else {
       cleanContainer = document.createElement('div');

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -19,10 +19,9 @@ import {
 } from 'react-server/src/ReactFizzServer';
 
 import {
-  createResources,
   createResponseState,
   createRootFormatContext,
-} from 'react-dom-bindings/src/server/ReactFizzConfigDOMLegacy';
+} from './ReactDOMServerLegacyFormatConfig';
 
 import {Readable} from 'stream';
 
@@ -41,13 +40,12 @@ class ReactMarkupReadableStream extends Readable {
     this.startedFlowing = false;
   }
 
-  // $FlowFixMe[missing-local-annot]
   _destroy(err, callback) {
     abort(this.request);
+    // $FlowFixMe: The type definition for the callback should allow undefined and null.
     callback(err);
   }
 
-  // $FlowFixMe[missing-local-annot]
   _read(size) {
     if (this.startedFlowing) {
       startFlowing(this.request, this);
@@ -71,20 +69,13 @@ function renderToNodeStreamImpl(
     startFlowing(request, destination);
   }
   const destination = new ReactMarkupReadableStream();
-  const resources = createResources();
   const request = createRequest(
     children,
-    resources,
-    createResponseState(
-      resources,
-      false,
-      options ? options.identifierPrefix : undefined,
-    ),
+    createResponseState(false, options ? options.identifierPrefix : undefined),
     createRootFormatContext(),
     Infinity,
     onError,
     onAllReady,
-    undefined,
     undefined,
     undefined,
   );

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -9,8 +9,6 @@
 
 let React;
 let Scheduler;
-let waitForAll;
-let assertLog;
 let ReactNoop;
 let useState;
 let act;
@@ -34,10 +32,6 @@ describe('act warnings', () => {
     startTransition = React.startTransition;
     getCacheForType = React.unstable_getCacheForType;
     caches = [];
-
-    const InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
-    assertLog = InternalTestUtils.assertLog;
   });
 
   function createTextCache() {
@@ -87,16 +81,16 @@ describe('act warnings', () => {
     if (record !== undefined) {
       switch (record.status) {
         case 'pending':
-          Scheduler.log(`Suspend! [${text}]`);
+          Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
           throw record.value;
         case 'rejected':
-          Scheduler.log(`Error! [${text}]`);
+          Scheduler.unstable_yieldValue(`Error! [${text}]`);
           throw record.value;
         case 'resolved':
           return textCache.version;
       }
     } else {
-      Scheduler.log(`Suspend! [${text}]`);
+      Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
 
       const thenable = {
         pings: [],
@@ -120,13 +114,13 @@ describe('act warnings', () => {
   }
 
   function Text({text}) {
-    Scheduler.log(text);
+    Scheduler.unstable_yieldValue(text);
     return text;
   }
 
   function AsyncText({text}) {
     readText(text);
-    Scheduler.log(text);
+    Scheduler.unstable_yieldValue(text);
     return text;
   }
 
@@ -140,17 +134,17 @@ describe('act warnings', () => {
     }
   }
 
-  async function withActEnvironment(value, scope) {
+  function withActEnvironment(value, scope) {
     const prevValue = global.IS_REACT_ACT_ENVIRONMENT;
     global.IS_REACT_ACT_ENVIRONMENT = value;
     try {
-      return await scope();
+      return scope();
     } finally {
       global.IS_REACT_ACT_ENVIRONMENT = prevValue;
     }
   }
 
-  test('warns about unwrapped updates only if environment flag is enabled', async () => {
+  test('warns about unwrapped updates only if environment flag is enabled', () => {
     let setState;
     function App() {
       const [state, _setState] = useState(0);
@@ -160,34 +154,34 @@ describe('act warnings', () => {
 
     const root = ReactNoop.createRoot();
     root.render(<App />);
-    await waitForAll([0]);
+    expect(Scheduler).toFlushAndYield([0]);
     expect(root).toMatchRenderedOutput('0');
 
     // Default behavior. Flag is undefined. No warning.
     expect(global.IS_REACT_ACT_ENVIRONMENT).toBe(undefined);
     setState(1);
-    await waitForAll([1]);
+    expect(Scheduler).toFlushAndYield([1]);
     expect(root).toMatchRenderedOutput('1');
 
     // Flag is true. Warn.
-    await withActEnvironment(true, async () => {
+    withActEnvironment(true, () => {
       expect(() => setState(2)).toErrorDev(
         'An update to App inside a test was not wrapped in act',
       );
-      await waitForAll([2]);
+      expect(Scheduler).toFlushAndYield([2]);
       expect(root).toMatchRenderedOutput('2');
     });
 
     // Flag is false. No warning.
-    await withActEnvironment(false, async () => {
+    withActEnvironment(false, () => {
       setState(3);
-      await waitForAll([3]);
+      expect(Scheduler).toFlushAndYield([3]);
       expect(root).toMatchRenderedOutput('3');
     });
   });
 
   // @gate __DEV__
-  test('act warns if the environment flag is not enabled', async () => {
+  test('act warns if the environment flag is not enabled', () => {
     let setState;
     function App() {
       const [state, _setState] = useState(0);
@@ -197,7 +191,7 @@ describe('act warnings', () => {
 
     const root = ReactNoop.createRoot();
     root.render(<App />);
-    await waitForAll([0]);
+    expect(Scheduler).toFlushAndYield([0]);
     expect(root).toMatchRenderedOutput('0');
 
     // Default behavior. Flag is undefined. Warn.
@@ -210,20 +204,20 @@ describe('act warnings', () => {
       'The current testing environment is not configured to support act(...)',
       {withoutStack: true},
     );
-    assertLog([1]);
+    expect(Scheduler).toHaveYielded([1]);
     expect(root).toMatchRenderedOutput('1');
 
     // Flag is true. Don't warn.
-    await withActEnvironment(true, () => {
+    withActEnvironment(true, () => {
       act(() => {
         setState(2);
       });
-      assertLog([2]);
+      expect(Scheduler).toHaveYielded([2]);
       expect(root).toMatchRenderedOutput('2');
     });
 
     // Flag is false. Warn.
-    await withActEnvironment(false, () => {
+    withActEnvironment(false, () => {
       expect(() => {
         act(() => {
           setState(1);
@@ -232,13 +226,13 @@ describe('act warnings', () => {
         'The current testing environment is not configured to support act(...)',
         {withoutStack: true},
       );
-      assertLog([1]);
+      expect(Scheduler).toHaveYielded([1]);
       expect(root).toMatchRenderedOutput('1');
     });
   });
 
-  test('warns if root update is not wrapped', async () => {
-    await withActEnvironment(true, () => {
+  test('warns if root update is not wrapped', () => {
+    withActEnvironment(true, () => {
       const root = ReactNoop.createRoot();
       expect(() => root.render('Hi')).toErrorDev(
         // TODO: Better error message that doesn't make it look like "Root" is
@@ -250,7 +244,7 @@ describe('act warnings', () => {
   });
 
   // @gate __DEV__
-  test('warns if class update is not wrapped', async () => {
+  test('warns if class update is not wrapped', () => {
     let app;
     class App extends React.Component {
       state = {count: 0};
@@ -260,7 +254,7 @@ describe('act warnings', () => {
       }
     }
 
-    await withActEnvironment(true, () => {
+    withActEnvironment(true, () => {
       const root = ReactNoop.createRoot();
       act(() => {
         root.render(<App />);
@@ -272,7 +266,7 @@ describe('act warnings', () => {
   });
 
   // @gate __DEV__
-  test('warns even if update is synchronous', async () => {
+  test('warns even if update is synchronous', () => {
     let setState;
     function App() {
       const [state, _setState] = useState(0);
@@ -280,10 +274,10 @@ describe('act warnings', () => {
       return <Text text={state} />;
     }
 
-    await withActEnvironment(true, () => {
+    withActEnvironment(true, () => {
       const root = ReactNoop.createRoot();
       act(() => root.render(<App />));
-      assertLog([0]);
+      expect(Scheduler).toHaveYielded([0]);
       expect(root).toMatchRenderedOutput('0');
 
       // Even though this update is synchronous, we should still fire a warning,
@@ -292,14 +286,14 @@ describe('act warnings', () => {
         'An update to App inside a test was not wrapped in act(...)',
       );
 
-      assertLog([1]);
+      expect(Scheduler).toHaveYielded([1]);
       expect(root).toMatchRenderedOutput('1');
     });
   });
 
   // @gate __DEV__
-  // @gate enableLegacyCache
-  test('warns if Suspense retry is not wrapped', async () => {
+  // @gate enableCache
+  test('warns if Suspense retry is not wrapped', () => {
     function App() {
       return (
         <Suspense fallback={<Text text="Loading..." />}>
@@ -308,16 +302,18 @@ describe('act warnings', () => {
       );
     }
 
-    await withActEnvironment(true, () => {
+    withActEnvironment(true, () => {
       const root = ReactNoop.createRoot();
       act(() => {
         root.render(<App />);
       });
-      assertLog(['Suspend! [Async]', 'Loading...']);
+      expect(Scheduler).toHaveYielded(['Suspend! [Async]', 'Loading...']);
       expect(root).toMatchRenderedOutput('Loading...');
 
       // This is a retry, not a ping, because we already showed a fallback.
-      expect(() => resolveText('Async')).toErrorDev(
+      expect(() =>
+        resolveText('Async'),
+      ).toErrorDev(
         'A suspended resource finished loading inside a test, but the event ' +
           'was not wrapped in act(...)',
         {withoutStack: true},
@@ -326,8 +322,8 @@ describe('act warnings', () => {
   });
 
   // @gate __DEV__
-  // @gate enableLegacyCache
-  test('warns if Suspense ping is not wrapped', async () => {
+  // @gate enableCache
+  test('warns if Suspense ping is not wrapped', () => {
     function App({showMore}) {
       return (
         <Suspense fallback={<Text text="Loading..." />}>
@@ -336,12 +332,12 @@ describe('act warnings', () => {
       );
     }
 
-    await withActEnvironment(true, () => {
+    withActEnvironment(true, () => {
       const root = ReactNoop.createRoot();
       act(() => {
         root.render(<App showMore={false} />);
       });
-      assertLog(['(empty)']);
+      expect(Scheduler).toHaveYielded(['(empty)']);
       expect(root).toMatchRenderedOutput('(empty)');
 
       act(() => {
@@ -349,11 +345,13 @@ describe('act warnings', () => {
           root.render(<App showMore={true} />);
         });
       });
-      assertLog(['Suspend! [Async]', 'Loading...']);
+      expect(Scheduler).toHaveYielded(['Suspend! [Async]', 'Loading...']);
       expect(root).toMatchRenderedOutput('(empty)');
 
       // This is a ping, not a retry, because no fallback is showing.
-      expect(() => resolveText('Async')).toErrorDev(
+      expect(() =>
+        resolveText('Async'),
+      ).toErrorDev(
         'A suspended resource finished loading inside a test, but the event ' +
           'was not wrapped in act(...)',
         {withoutStack: true},

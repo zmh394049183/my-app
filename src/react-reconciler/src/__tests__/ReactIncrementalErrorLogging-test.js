@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -13,8 +13,6 @@
 let React;
 let ReactNoop;
 let Scheduler;
-let waitForAll;
-let waitForThrow;
 
 describe('ReactIncrementalErrorLogging', () => {
   beforeEach(() => {
@@ -22,10 +20,6 @@ describe('ReactIncrementalErrorLogging', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-
-    const InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
-    waitForThrow = InternalTestUtils.waitForThrow;
   });
 
   // Note: in this test file we won't be using toErrorDev() matchers
@@ -41,7 +35,7 @@ describe('ReactIncrementalErrorLogging', () => {
     oldConsoleError = null;
   });
 
-  it('should log errors that occur during the begin phase', async () => {
+  it('should log errors that occur during the begin phase', () => {
     class ErrorThrowingComponent extends React.Component {
       constructor(props) {
         super(props);
@@ -58,7 +52,7 @@ describe('ReactIncrementalErrorLogging', () => {
         </span>
       </div>,
     );
-    await waitForThrow('constructor error');
+    expect(Scheduler).toFlushAndThrow('constructor error');
     expect(console.error).toHaveBeenCalledTimes(1);
     expect(console.error).toHaveBeenCalledWith(
       __DEV__
@@ -78,7 +72,7 @@ describe('ReactIncrementalErrorLogging', () => {
     );
   });
 
-  it('should log errors that occur during the commit phase', async () => {
+  it('should log errors that occur during the commit phase', () => {
     class ErrorThrowingComponent extends React.Component {
       componentDidMount() {
         throw new Error('componentDidMount error');
@@ -94,7 +88,7 @@ describe('ReactIncrementalErrorLogging', () => {
         </span>
       </div>,
     );
-    await waitForThrow('componentDidMount error');
+    expect(Scheduler).toFlushAndThrow('componentDidMount error');
     expect(console.error).toHaveBeenCalledTimes(1);
     expect(console.error).toHaveBeenCalledWith(
       __DEV__
@@ -114,7 +108,7 @@ describe('ReactIncrementalErrorLogging', () => {
     );
   });
 
-  it('should ignore errors thrown in log method to prevent cycle', async () => {
+  it('should ignore errors thrown in log method to prevent cycle', () => {
     const logCapturedErrorCalls = [];
     console.error.mockImplementation(error => {
       // Test what happens when logging itself is buggy.
@@ -133,7 +127,7 @@ describe('ReactIncrementalErrorLogging', () => {
         </span>
       </div>,
     );
-    await waitForThrow('render error');
+    expect(Scheduler).toFlushAndThrow('render error');
     expect(logCapturedErrorCalls.length).toBe(1);
     expect(logCapturedErrorCalls[0]).toEqual(
       __DEV__
@@ -157,7 +151,7 @@ describe('ReactIncrementalErrorLogging', () => {
     }).toThrow('logCapturedError error');
   });
 
-  it('resets instance variables before unmounting failed node', async () => {
+  it('resets instance variables before unmounting failed node', () => {
     class ErrorBoundary extends React.Component {
       state = {error: null};
       componentDidCatch(error) {
@@ -173,10 +167,12 @@ describe('ReactIncrementalErrorLogging', () => {
         this.setState({step: 1});
       }
       componentWillUnmount() {
-        Scheduler.log('componentWillUnmount: ' + this.state.step);
+        Scheduler.unstable_yieldValue(
+          'componentWillUnmount: ' + this.state.step,
+        );
       }
       render() {
-        Scheduler.log('render: ' + this.state.step);
+        Scheduler.unstable_yieldValue('render: ' + this.state.step);
         if (this.state.step > 0) {
           throw new Error('oops');
         }
@@ -189,7 +185,7 @@ describe('ReactIncrementalErrorLogging', () => {
         <Foo />
       </ErrorBoundary>,
     );
-    await waitForAll(
+    expect(Scheduler).toFlushAndYield(
       [
         'render: 0',
 

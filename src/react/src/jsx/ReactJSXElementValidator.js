@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -21,6 +21,7 @@ import {
   REACT_FRAGMENT_TYPE,
   REACT_ELEMENT_TYPE,
 } from 'shared/ReactSymbols';
+import {warnAboutSpreadingKeyToJSX} from 'shared/ReactFeatureFlags';
 import hasOwnProperty from 'shared/hasOwnProperty';
 import isArray from 'shared/isArray';
 import {jsxDEV} from './ReactJSXElement';
@@ -31,8 +32,6 @@ import ReactSharedInternals from 'shared/ReactSharedInternals';
 
 const ReactCurrentOwner = ReactSharedInternals.ReactCurrentOwner;
 const ReactDebugCurrentFrame = ReactSharedInternals.ReactDebugCurrentFrame;
-
-const REACT_CLIENT_REFERENCE = Symbol.for('react.client.reference');
 
 function setCurrentlyValidatingElement(element) {
   if (__DEV__) {
@@ -181,12 +180,10 @@ function validateExplicitKey(element, parentType) {
  */
 function validateChildKeys(node, parentType) {
   if (__DEV__) {
-    if (typeof node !== 'object' || !node) {
+    if (typeof node !== 'object') {
       return;
     }
-    if (node.$$typeof === REACT_CLIENT_REFERENCE) {
-      // This is a reference to a client component so it's unknown.
-    } else if (isArray(node)) {
+    if (isArray(node)) {
       for (let i = 0; i < node.length; i++) {
         const child = node[i];
         if (isValidElement(child)) {
@@ -198,7 +195,7 @@ function validateChildKeys(node, parentType) {
       if (node._store) {
         node._store.validated = true;
       }
-    } else {
+    } else if (node) {
       const iteratorFn = getIteratorFn(node);
       if (typeof iteratorFn === 'function') {
         // Entry iterators used to provide implicit keys,
@@ -227,9 +224,6 @@ function validatePropTypes(element) {
   if (__DEV__) {
     const type = element.type;
     if (type === null || type === undefined || typeof type === 'string') {
-      return;
-    }
-    if (type.$$typeof === REACT_CLIENT_REFERENCE) {
       return;
     }
     let propTypes;
@@ -299,8 +293,6 @@ function validateFragmentProps(fragment) {
     }
   }
 }
-
-const didWarnAboutKeySpread = {};
 
 export function jsxWithValidation(
   type,
@@ -396,29 +388,14 @@ export function jsxWithValidation(
       }
     }
 
-    if (hasOwnProperty.call(props, 'key')) {
-      const componentName = getComponentNameFromType(type);
-      const keys = Object.keys(props).filter(k => k !== 'key');
-      const beforeExample =
-        keys.length > 0
-          ? '{key: someKey, ' + keys.join(': ..., ') + ': ...}'
-          : '{key: someKey}';
-      if (!didWarnAboutKeySpread[componentName + beforeExample]) {
-        const afterExample =
-          keys.length > 0 ? '{' + keys.join(': ..., ') + ': ...}' : '{}';
+    if (warnAboutSpreadingKeyToJSX) {
+      if (hasOwnProperty.call(props, 'key')) {
         console.error(
-          'A props object containing a "key" prop is being spread into JSX:\n' +
-            '  let props = %s;\n' +
-            '  <%s {...props} />\n' +
-            'React keys must be passed directly to JSX without using spread:\n' +
-            '  let props = %s;\n' +
-            '  <%s key={someKey} {...props} />',
-          beforeExample,
-          componentName,
-          afterExample,
-          componentName,
+          'React.jsx: Spreading a key to JSX is a deprecated pattern. ' +
+            'Explicitly pass a key after spreading props in your JSX call. ' +
+            'E.g. <%s {...props} key={key} />',
+          getComponentNameFromType(type) || 'ComponentName',
         );
-        didWarnAboutKeySpread[componentName + beforeExample] = true;
       }
     }
 

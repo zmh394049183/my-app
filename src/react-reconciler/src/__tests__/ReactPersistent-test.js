@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,7 +12,7 @@
 
 let React;
 let ReactNoopPersistent;
-let waitForAll;
+let Scheduler;
 
 describe('ReactPersistent', () => {
   beforeEach(() => {
@@ -20,8 +20,7 @@ describe('ReactPersistent', () => {
 
     React = require('react');
     ReactNoopPersistent = require('react-noop-renderer/persistent');
-    const InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
+    Scheduler = require('scheduler');
   });
 
   // Inlined from shared folder so we can run this test on a bundle.
@@ -50,15 +49,11 @@ describe('ReactPersistent', () => {
     return {type: 'span', children: [], prop, hidden: false};
   }
 
-  // For persistent renderers we have to mix deep equality and reference equality checks
-  //  for which we need the actual children.
-  //  None of the tests are gated and the underlying implementation is rarely touch
-  //  so it's unlikely we deal with failing `toEqual` checks which cause bad performance.
-  function dangerouslyGetChildren() {
-    return ReactNoopPersistent.dangerouslyGetChildren();
+  function getChildren() {
+    return ReactNoopPersistent.getChildren();
   }
 
-  it('can update child nodes of a host instance', async () => {
+  it('can update child nodes of a host instance', () => {
     function Bar(props) {
       return <span>{props.text}</span>;
     }
@@ -73,19 +68,19 @@ describe('ReactPersistent', () => {
     }
 
     render(<Foo text="Hello" />);
-    await waitForAll([]);
-    const originalChildren = dangerouslyGetChildren();
+    expect(Scheduler).toFlushWithoutYielding();
+    const originalChildren = getChildren();
     expect(originalChildren).toEqual([div(span())]);
 
     render(<Foo text="World" />);
-    await waitForAll([]);
-    const newChildren = dangerouslyGetChildren();
+    expect(Scheduler).toFlushWithoutYielding();
+    const newChildren = getChildren();
     expect(newChildren).toEqual([div(span(), span())]);
 
     expect(originalChildren).toEqual([div(span())]);
   });
 
-  it('can reuse child nodes between updates', async () => {
+  it('can reuse child nodes between updates', () => {
     function Baz(props) {
       return <span prop={props.text} />;
     }
@@ -107,13 +102,13 @@ describe('ReactPersistent', () => {
     }
 
     render(<Foo text="Hello" />);
-    await waitForAll([]);
-    const originalChildren = dangerouslyGetChildren();
+    expect(Scheduler).toFlushWithoutYielding();
+    const originalChildren = getChildren();
     expect(originalChildren).toEqual([div(span('Hello'))]);
 
     render(<Foo text="World" />);
-    await waitForAll([]);
-    const newChildren = dangerouslyGetChildren();
+    expect(Scheduler).toFlushWithoutYielding();
+    const newChildren = getChildren();
     expect(newChildren).toEqual([div(span('Hello'), span('World'))]);
 
     expect(originalChildren).toEqual([div(span('Hello'))]);
@@ -122,7 +117,7 @@ describe('ReactPersistent', () => {
     expect(newChildren[0].children[0]).toBe(originalChildren[0].children[0]);
   });
 
-  it('can update child text nodes', async () => {
+  it('can update child text nodes', () => {
     function Foo(props) {
       return (
         <div>
@@ -133,19 +128,19 @@ describe('ReactPersistent', () => {
     }
 
     render(<Foo text="Hello" />);
-    await waitForAll([]);
-    const originalChildren = dangerouslyGetChildren();
+    expect(Scheduler).toFlushWithoutYielding();
+    const originalChildren = getChildren();
     expect(originalChildren).toEqual([div('Hello', span())]);
 
     render(<Foo text="World" />);
-    await waitForAll([]);
-    const newChildren = dangerouslyGetChildren();
+    expect(Scheduler).toFlushWithoutYielding();
+    const newChildren = getChildren();
     expect(newChildren).toEqual([div('World', span())]);
 
     expect(originalChildren).toEqual([div('Hello', span())]);
   });
 
-  it('supports portals', async () => {
+  it('supports portals', () => {
     function Parent(props) {
       return <div>{props.children}</div>;
     }
@@ -174,11 +169,11 @@ describe('ReactPersistent', () => {
     const portalContainer = {rootID: 'persistent-portal-test', children: []};
     const emptyPortalChildSet = portalContainer.children;
     render(<Parent>{createPortal(<Child />, portalContainer, null)}</Parent>);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     expect(emptyPortalChildSet).toEqual([]);
 
-    const originalChildren = dangerouslyGetChildren();
+    const originalChildren = getChildren();
     expect(originalChildren).toEqual([div()]);
     const originalPortalChildren = portalContainer.children;
     expect(originalPortalChildren).toEqual([div(span())]);
@@ -188,9 +183,9 @@ describe('ReactPersistent', () => {
         {createPortal(<Child>Hello {'World'}</Child>, portalContainer, null)}
       </Parent>,
     );
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
-    const newChildren = dangerouslyGetChildren();
+    const newChildren = getChildren();
     expect(newChildren).toEqual([div()]);
     const newPortalChildren = portalContainer.children;
     expect(newPortalChildren).toEqual([div(span(), 'Hello ', 'World')]);
@@ -205,7 +200,7 @@ describe('ReactPersistent', () => {
 
     // Deleting the Portal, should clear its children
     render(<Parent />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     const clearedPortalChildren = portalContainer.children;
     expect(clearedPortalChildren).toEqual([]);

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -14,10 +14,6 @@ let React;
 let ReactNoop;
 let Scheduler;
 let PropTypes;
-let waitForAll;
-let waitFor;
-let waitForThrow;
-let assertLog;
 
 describe('ReactIncremental', () => {
   beforeEach(() => {
@@ -26,12 +22,6 @@ describe('ReactIncremental', () => {
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
     PropTypes = require('prop-types');
-
-    const InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
-    waitFor = InternalTestUtils.waitFor;
-    waitForThrow = InternalTestUtils.waitForThrow;
-    assertLog = InternalTestUtils.assertLog;
   });
 
   // Note: This is based on a similar component we use in www. We can delete
@@ -47,7 +37,7 @@ describe('ReactIncremental', () => {
     );
   }
 
-  it('should render a simple component', async () => {
+  it('should render a simple component', () => {
     function Bar() {
       return <div>Hello World</div>;
     }
@@ -57,12 +47,12 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Foo />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
   });
 
-  it('should render a simple component, in steps if needed', async () => {
+  it('should render a simple component, in steps if needed', () => {
     function Bar() {
-      Scheduler.log('Bar');
+      Scheduler.unstable_yieldValue('Bar');
       return (
         <span>
           <div>Hello World</div>
@@ -71,33 +61,41 @@ describe('ReactIncremental', () => {
     }
 
     function Foo() {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return [<Bar key="a" isBar={true} />, <Bar key="b" isBar={true} />];
     }
 
-    React.startTransition(() => {
-      ReactNoop.render(<Foo />, () => Scheduler.log('callback'));
-    });
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Foo />, () =>
+          Scheduler.unstable_yieldValue('callback'),
+        );
+      });
+    } else {
+      ReactNoop.render(<Foo />, () =>
+        Scheduler.unstable_yieldValue('callback'),
+      );
+    }
     // Do one step of work.
-    await waitFor(['Foo']);
+    expect(ReactNoop.flushNextYield()).toEqual(['Foo']);
 
     // Do the rest of the work.
-    await waitForAll(['Bar', 'Bar', 'callback']);
+    expect(Scheduler).toFlushAndYield(['Bar', 'Bar', 'callback']);
   });
 
-  it('updates a previous render', async () => {
+  it('updates a previous render', () => {
     function Header() {
-      Scheduler.log('Header');
+      Scheduler.unstable_yieldValue('Header');
       return <h1>Hi</h1>;
     }
 
     function Content(props) {
-      Scheduler.log('Content');
+      Scheduler.unstable_yieldValue('Content');
       return <div>{props.children}</div>;
     }
 
     function Footer() {
-      Scheduler.log('Footer');
+      Scheduler.unstable_yieldValue('Footer');
       return <footer>Bye</footer>;
     }
 
@@ -105,7 +103,7 @@ describe('ReactIncremental', () => {
     const footer = <Footer />;
 
     function Foo(props) {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return (
         <div>
           {header}
@@ -116,9 +114,9 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Foo text="foo" />, () =>
-      Scheduler.log('renderCallbackCalled'),
+      Scheduler.unstable_yieldValue('renderCallbackCalled'),
     );
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'Foo',
       'Header',
       'Content',
@@ -127,16 +125,16 @@ describe('ReactIncremental', () => {
     ]);
 
     ReactNoop.render(<Foo text="bar" />, () =>
-      Scheduler.log('firstRenderCallbackCalled'),
+      Scheduler.unstable_yieldValue('firstRenderCallbackCalled'),
     );
     ReactNoop.render(<Foo text="bar" />, () =>
-      Scheduler.log('secondRenderCallbackCalled'),
+      Scheduler.unstable_yieldValue('secondRenderCallbackCalled'),
     );
     // TODO: Test bail out of host components. This is currently unobservable.
 
     // Since this is an update, it should bail out and reuse the work from
     // Header and Content.
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'Foo',
       'Content',
       'firstRenderCallbackCalled',
@@ -144,14 +142,14 @@ describe('ReactIncremental', () => {
     ]);
   });
 
-  it('can cancel partially rendered work and restart', async () => {
+  it('can cancel partially rendered work and restart', () => {
     function Bar(props) {
-      Scheduler.log('Bar');
+      Scheduler.unstable_yieldValue('Bar');
       return <div>{props.children}</div>;
     }
 
     function Foo(props) {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return (
         <div>
           <Bar>{props.text}</Bar>
@@ -162,29 +160,37 @@ describe('ReactIncremental', () => {
 
     // Init
     ReactNoop.render(<Foo text="foo" />);
-    await waitForAll(['Foo', 'Bar', 'Bar']);
+    expect(Scheduler).toFlushAndYield(['Foo', 'Bar', 'Bar']);
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Foo text="bar" />);
+      });
+    } else {
       ReactNoop.render(<Foo text="bar" />);
-    });
+    }
     // Flush part of the work
-    await waitFor(['Foo', 'Bar']);
+    expect(Scheduler).toFlushAndYieldThrough(['Foo', 'Bar']);
 
     // This will abort the previous work and restart
     ReactNoop.flushSync(() => ReactNoop.render(null));
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Foo text="baz" />);
+      });
+    } else {
       ReactNoop.render(<Foo text="baz" />);
-    });
+    }
 
     // Flush part of the new work
-    await waitFor(['Foo', 'Bar']);
+    expect(Scheduler).toFlushAndYieldThrough(['Foo', 'Bar']);
 
     // Flush the rest of the work which now includes the low priority
-    await waitForAll(['Bar']);
+    expect(Scheduler).toFlushAndYield(['Bar']);
   });
 
-  it('should call callbacks even if updates are aborted', async () => {
+  it('should call callbacks even if updates are aborted', () => {
     let inst;
 
     class Foo extends React.Component {
@@ -207,52 +213,77 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Foo />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        inst.setState(
+          () => {
+            Scheduler.unstable_yieldValue('setState1');
+            return {text: 'bar'};
+          },
+          () => Scheduler.unstable_yieldValue('callback1'),
+        );
+      });
+    } else {
       inst.setState(
         () => {
-          Scheduler.log('setState1');
+          Scheduler.unstable_yieldValue('setState1');
           return {text: 'bar'};
         },
-        () => Scheduler.log('callback1'),
+        () => Scheduler.unstable_yieldValue('callback1'),
       );
-    });
+    }
 
     // Flush part of the work
-    await waitFor(['setState1']);
+    expect(Scheduler).toFlushAndYieldThrough(['setState1']);
 
     // This will abort the previous work and restart
     ReactNoop.flushSync(() => ReactNoop.render(<Foo />));
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        inst.setState(
+          () => {
+            Scheduler.unstable_yieldValue('setState2');
+            return {text2: 'baz'};
+          },
+          () => Scheduler.unstable_yieldValue('callback2'),
+        );
+      });
+    } else {
       inst.setState(
         () => {
-          Scheduler.log('setState2');
+          Scheduler.unstable_yieldValue('setState2');
           return {text2: 'baz'};
         },
-        () => Scheduler.log('callback2'),
+        () => Scheduler.unstable_yieldValue('callback2'),
       );
-    });
+    }
 
     // Flush the rest of the work which now includes the low priority
-    await waitForAll(['setState1', 'setState2', 'callback1', 'callback2']);
+    expect(Scheduler).toFlushAndYield([
+      'setState1',
+      'setState2',
+      'callback1',
+      'callback2',
+    ]);
     expect(inst.state).toEqual({text: 'bar', text2: 'baz'});
   });
 
   // @gate www
-  it('can deprioritize unfinished work and resume it later', async () => {
+  it('can deprioritize unfinished work and resume it later', () => {
     function Bar(props) {
-      Scheduler.log('Bar');
+      Scheduler.unstable_yieldValue('Bar');
       return <div>{props.children}</div>;
     }
 
     function Middle(props) {
-      Scheduler.log('Middle');
+      Scheduler.unstable_yieldValue('Middle');
       return <span>{props.children}</span>;
     }
 
     function Foo(props) {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return (
         <div>
           <Bar>{props.text}</Bar>
@@ -269,30 +300,36 @@ describe('ReactIncremental', () => {
 
     // Init
     ReactNoop.render(<Foo text="foo" />);
-    await waitForAll(['Foo', 'Bar', 'Bar', 'Middle', 'Middle']);
+    expect(Scheduler).toFlushAndYield([
+      'Foo',
+      'Bar',
+      'Bar',
+      'Middle',
+      'Middle',
+    ]);
 
     // Render part of the work. This should be enough to flush everything except
     // the middle which has lower priority.
     ReactNoop.render(<Foo text="bar" />);
-    await waitFor(['Foo', 'Bar', 'Bar']);
+    expect(Scheduler).toFlushAndYieldThrough(['Foo', 'Bar', 'Bar']);
     // Flush only the remaining work
-    await waitForAll(['Middle', 'Middle']);
+    expect(Scheduler).toFlushAndYield(['Middle', 'Middle']);
   });
 
   // @gate www
-  it('can deprioritize a tree from without dropping work', async () => {
+  it('can deprioritize a tree from without dropping work', () => {
     function Bar(props) {
-      Scheduler.log('Bar');
+      Scheduler.unstable_yieldValue('Bar');
       return <div>{props.children}</div>;
     }
 
     function Middle(props) {
-      Scheduler.log('Middle');
+      Scheduler.unstable_yieldValue('Middle');
       return <span>{props.children}</span>;
     }
 
     function Foo(props) {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return (
         <div>
           <Bar>{props.text}</Bar>
@@ -311,35 +348,35 @@ describe('ReactIncremental', () => {
     ReactNoop.flushSync(() => {
       ReactNoop.render(<Foo text="foo" />);
     });
-    assertLog(['Foo', 'Bar', 'Bar']);
-    await waitForAll(['Middle', 'Middle']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar', 'Bar']);
+    expect(Scheduler).toFlushAndYield(['Middle', 'Middle']);
 
     // Render the high priority work (everything except the hidden trees).
     ReactNoop.flushSync(() => {
       ReactNoop.render(<Foo text="foo" />);
     });
-    assertLog(['Foo', 'Bar', 'Bar']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar', 'Bar']);
 
     // The hidden content was deprioritized from high to low priority. A low
     // priority callback should have been scheduled. Flush it now.
-    await waitForAll(['Middle', 'Middle']);
+    expect(Scheduler).toFlushAndYield(['Middle', 'Middle']);
   });
 
-  xit('can resume work in a subtree even when a parent bails out', async () => {
+  xit('can resume work in a subtree even when a parent bails out', () => {
     function Bar(props) {
-      Scheduler.log('Bar');
+      Scheduler.unstable_yieldValue('Bar');
       return <div>{props.children}</div>;
     }
 
     function Tester() {
       // This component is just here to ensure that the bail out is
       // in fact in effect in the expected place for this test.
-      Scheduler.log('Tester');
+      Scheduler.unstable_yieldValue('Tester');
       return <div />;
     }
 
     function Middle(props) {
-      Scheduler.log('Middle');
+      Scheduler.unstable_yieldValue('Middle');
       return <span>{props.children}</span>;
     }
 
@@ -355,7 +392,7 @@ describe('ReactIncremental', () => {
     );
 
     function Foo(props) {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return (
         <div>
           <Bar>{props.text}</Bar>
@@ -369,21 +406,21 @@ describe('ReactIncremental', () => {
     ReactNoop.render(<Foo text="foo" />);
     ReactNoop.flushDeferredPri(52);
 
-    assertLog(['Foo', 'Bar', 'Tester', 'Bar']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar', 'Tester', 'Bar']);
 
     // We're now rendering an update that will bail out on updating middle.
     ReactNoop.render(<Foo text="bar" />);
     ReactNoop.flushDeferredPri(45 + 5);
 
-    assertLog(['Foo', 'Bar', 'Bar']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar', 'Bar']);
 
     // Flush the rest to make sure that the bailout didn't block this work.
-    await waitForAll(['Middle']);
+    expect(Scheduler).toFlushAndYield(['Middle']);
   });
 
-  xit('can resume work in a bailed subtree within one pass', async () => {
+  xit('can resume work in a bailed subtree within one pass', () => {
     function Bar(props) {
-      Scheduler.log('Bar');
+      Scheduler.unstable_yieldValue('Bar');
       return <div>{props.children}</div>;
     }
 
@@ -394,13 +431,13 @@ describe('ReactIncremental', () => {
       render() {
         // This component is just here to ensure that the bail out is
         // in fact in effect in the expected place for this test.
-        Scheduler.log('Tester');
+        Scheduler.unstable_yieldValue('Tester');
         return <div />;
       }
     }
 
     function Middle(props) {
-      Scheduler.log('Middle');
+      Scheduler.unstable_yieldValue('Middle');
       return <span>{props.children}</span>;
     }
 
@@ -423,7 +460,7 @@ describe('ReactIncremental', () => {
     }
 
     function Foo(props) {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return (
         <div hidden={props.text === 'bar'}>
           <Bar>{props.text}</Bar>
@@ -437,37 +474,37 @@ describe('ReactIncremental', () => {
     ReactNoop.render(<Foo text="foo" />);
     ReactNoop.flushDeferredPri(52 + 5);
 
-    assertLog(['Foo', 'Bar', 'Tester', 'Bar']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar', 'Tester', 'Bar']);
 
     // Make a quick update which will create a low pri tree on top of the
     // already low pri tree.
     ReactNoop.render(<Foo text="bar" />);
     ReactNoop.flushDeferredPri(15);
 
-    assertLog(['Foo']);
+    expect(Scheduler).toHaveYielded(['Foo']);
 
     // At this point, middle will bail out but it has not yet fully rendered.
     // Since that is the same priority as its parent tree. This should render
     // as a single batch. Therefore, it is correct that Middle should be in the
     // middle. If it occurs after the two "Bar" components then it was flushed
     // after them which is not correct.
-    await waitForAll(['Bar', 'Middle', 'Bar']);
+    expect(Scheduler).toFlushAndYield(['Bar', 'Middle', 'Bar']);
 
     // Let us try this again without fully finishing the first time. This will
     // create a hanging subtree that is reconciling at the normal priority.
     ReactNoop.render(<Foo text="foo" />);
     ReactNoop.flushDeferredPri(40);
 
-    assertLog(['Foo', 'Bar']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar']);
 
     // This update will create a tree that aborts that work and down-prioritizes
     // it. If the priority levels aren't down-prioritized correctly this may
     // abort rendering of the down-prioritized content.
     ReactNoop.render(<Foo text="bar" />);
-    await waitForAll(['Foo', 'Bar', 'Bar']);
+    expect(Scheduler).toFlushAndYield(['Foo', 'Bar', 'Bar']);
   });
 
-  xit('can resume mounting a class component', async () => {
+  xit('can resume mounting a class component', () => {
     let foo;
     class Parent extends React.Component {
       shouldComponentUpdate() {
@@ -482,30 +519,30 @@ describe('ReactIncremental', () => {
       constructor(props) {
         super(props);
         // Test based on a www bug where props was null on resume
-        Scheduler.log('Foo constructor: ' + props.prop);
+        Scheduler.unstable_yieldValue('Foo constructor: ' + props.prop);
       }
       render() {
         foo = this;
-        Scheduler.log('Foo');
+        Scheduler.unstable_yieldValue('Foo');
         return <Bar />;
       }
     }
 
     function Bar() {
-      Scheduler.log('Bar');
+      Scheduler.unstable_yieldValue('Bar');
       return <div />;
     }
 
     ReactNoop.render(<Parent prop="foo" />);
     ReactNoop.flushDeferredPri(20);
-    assertLog(['Foo constructor: foo', 'Foo']);
+    expect(Scheduler).toHaveYielded(['Foo constructor: foo', 'Foo']);
 
     foo.setState({value: 'bar'});
 
-    await waitForAll(['Foo', 'Bar']);
+    expect(Scheduler).toFlushAndYield(['Foo', 'Bar']);
   });
 
-  xit('reuses the same instance when resuming a class instance', async () => {
+  xit('reuses the same instance when resuming a class instance', () => {
     let foo;
     class Parent extends React.Component {
       shouldComponentUpdate() {
@@ -521,39 +558,43 @@ describe('ReactIncremental', () => {
       constructor(props) {
         super(props);
         // Test based on a www bug where props was null on resume
-        Scheduler.log('constructor: ' + props.prop);
+        Scheduler.unstable_yieldValue('constructor: ' + props.prop);
         constructorCount++;
       }
       UNSAFE_componentWillMount() {
-        Scheduler.log('componentWillMount: ' + this.props.prop);
+        Scheduler.unstable_yieldValue('componentWillMount: ' + this.props.prop);
       }
       UNSAFE_componentWillReceiveProps() {
-        Scheduler.log('componentWillReceiveProps: ' + this.props.prop);
+        Scheduler.unstable_yieldValue(
+          'componentWillReceiveProps: ' + this.props.prop,
+        );
       }
       componentDidMount() {
-        Scheduler.log('componentDidMount: ' + this.props.prop);
+        Scheduler.unstable_yieldValue('componentDidMount: ' + this.props.prop);
       }
       UNSAFE_componentWillUpdate() {
-        Scheduler.log('componentWillUpdate: ' + this.props.prop);
+        Scheduler.unstable_yieldValue(
+          'componentWillUpdate: ' + this.props.prop,
+        );
       }
       componentDidUpdate() {
-        Scheduler.log('componentDidUpdate: ' + this.props.prop);
+        Scheduler.unstable_yieldValue('componentDidUpdate: ' + this.props.prop);
       }
       render() {
         foo = this;
-        Scheduler.log('render: ' + this.props.prop);
+        Scheduler.unstable_yieldValue('render: ' + this.props.prop);
         return <Bar />;
       }
     }
 
     function Bar() {
-      Scheduler.log('Foo did complete');
+      Scheduler.unstable_yieldValue('Foo did complete');
       return <div />;
     }
 
     ReactNoop.render(<Parent prop="foo" />);
     ReactNoop.flushDeferredPri(25);
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       'constructor: foo',
       'componentWillMount: foo',
       'render: foo',
@@ -562,9 +603,9 @@ describe('ReactIncremental', () => {
 
     foo.setState({value: 'bar'});
 
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(constructorCount).toEqual(1);
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       'componentWillMount: foo',
       'render: foo',
       'Foo did complete',
@@ -572,14 +613,14 @@ describe('ReactIncremental', () => {
     ]);
   });
 
-  xit('can reuse work done after being preempted', async () => {
+  xit('can reuse work done after being preempted', () => {
     function Bar(props) {
-      Scheduler.log('Bar');
+      Scheduler.unstable_yieldValue('Bar');
       return <div>{props.children}</div>;
     }
 
     function Middle(props) {
-      Scheduler.log('Middle');
+      Scheduler.unstable_yieldValue('Middle');
       return <span>{props.children}</span>;
     }
 
@@ -600,7 +641,7 @@ describe('ReactIncremental', () => {
     );
 
     function Foo(props) {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return (
         <div>
           <Bar>{props.text2}</Bar>
@@ -615,52 +656,52 @@ describe('ReactIncremental', () => {
 
     // We only finish the higher priority work. So the low pri content
     // has not yet finished mounting.
-    assertLog(['Foo', 'Bar', 'Middle', 'Bar']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar', 'Middle', 'Bar']);
 
     // Interrupt the rendering with a quick update. This should not touch the
     // middle content.
     ReactNoop.render(<Foo text="foo" text2="bar" step={0} />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     // We've now rendered the entire tree but we didn't have to redo the work
     // done by the first Middle and Bar already.
-    assertLog(['Foo', 'Bar', 'Middle']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar', 'Middle']);
 
     // Make a quick update which will schedule low priority work to
     // update the middle content.
     ReactNoop.render(<Foo text="bar" text2="bar" step={1} />);
     ReactNoop.flushDeferredPri(30 + 25 + 5);
 
-    assertLog(['Foo', 'Bar']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar']);
 
     // The middle content is now pending rendering...
     ReactNoop.flushDeferredPri(30 + 5);
-    assertLog(['Middle', 'Bar']);
+    expect(Scheduler).toHaveYielded(['Middle', 'Bar']);
 
     // but we'll interrupt it to render some higher priority work.
     // The middle content will bailout so it remains untouched.
     ReactNoop.render(<Foo text="foo" text2="bar" step={1} />);
     ReactNoop.flushDeferredPri(30);
 
-    assertLog(['Foo', 'Bar']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar']);
 
     // Since we did nothing to the middle subtree during the interruption,
     // we should be able to reuse the reconciliation work that we already did
     // without restarting.
-    await waitForAll(['Middle']);
+    expect(Scheduler).toFlushAndYield(['Middle']);
   });
 
-  xit('can reuse work that began but did not complete, after being preempted', async () => {
+  xit('can reuse work that began but did not complete, after being preempted', () => {
     let child;
     let sibling;
 
     function GreatGrandchild() {
-      Scheduler.log('GreatGrandchild');
+      Scheduler.unstable_yieldValue('GreatGrandchild');
       return <div />;
     }
 
     function Grandchild() {
-      Scheduler.log('Grandchild');
+      Scheduler.unstable_yieldValue('Grandchild');
       return <GreatGrandchild />;
     }
 
@@ -668,21 +709,21 @@ describe('ReactIncremental', () => {
       state = {step: 0};
       render() {
         child = this;
-        Scheduler.log('Child');
+        Scheduler.unstable_yieldValue('Child');
         return <Grandchild />;
       }
     }
 
     class Sibling extends React.Component {
       render() {
-        Scheduler.log('Sibling');
+        Scheduler.unstable_yieldValue('Sibling');
         sibling = this;
         return <div />;
       }
     }
 
     function Parent() {
-      Scheduler.log('Parent');
+      Scheduler.unstable_yieldValue('Parent');
       return [
         // The extra div is necessary because when Parent bails out during the
         // high priority update, its progressedPriority is set to high.
@@ -698,13 +739,13 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Parent />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     // Begin working on a low priority update to Child, but stop before
     // GreatGrandchild. Child and Grandchild begin but don't complete.
     child.setState({step: 1});
     ReactNoop.flushDeferredPri(30);
-    assertLog(['Child', 'Grandchild']);
+    expect(Scheduler).toHaveYielded(['Child', 'Grandchild']);
 
     // Interrupt the current low pri work with a high pri update elsewhere in
     // the tree.
@@ -712,21 +753,21 @@ describe('ReactIncremental', () => {
     ReactNoop.flushSync(() => {
       sibling.setState({});
     });
-    assertLog(['Sibling']);
+    expect(Scheduler).toHaveYielded(['Sibling']);
 
     // Continue the low pri work. The work on Child and GrandChild was memoized
     // so they should not be worked on again.
 
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       // No Child
       // No Grandchild
       'GreatGrandchild',
     ]);
   });
 
-  xit('can reuse work if shouldComponentUpdate is false, after being preempted', async () => {
+  xit('can reuse work if shouldComponentUpdate is false, after being preempted', () => {
     function Bar(props) {
-      Scheduler.log('Bar');
+      Scheduler.unstable_yieldValue('Bar');
       return <div>{props.children}</div>;
     }
 
@@ -735,7 +776,7 @@ describe('ReactIncremental', () => {
         return this.props.children !== nextProps.children;
       }
       render() {
-        Scheduler.log('Middle');
+        Scheduler.unstable_yieldValue('Middle');
         return <span>{this.props.children}</span>;
       }
     }
@@ -745,7 +786,7 @@ describe('ReactIncremental', () => {
         return this.props.step !== nextProps.step;
       }
       render() {
-        Scheduler.log('Content');
+        Scheduler.unstable_yieldValue('Content');
         return (
           <div>
             <Middle>{this.props.step === 0 ? 'Hi' : 'Hello'}</Middle>
@@ -757,7 +798,7 @@ describe('ReactIncremental', () => {
     }
 
     function Foo(props) {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return (
         <div>
           <Bar>{props.text}</Bar>
@@ -770,55 +811,62 @@ describe('ReactIncremental', () => {
 
     // Init
     ReactNoop.render(<Foo text="foo" step={0} />);
-    await waitForAll(['Foo', 'Bar', 'Content', 'Middle', 'Bar', 'Middle']);
+    expect(Scheduler).toFlushAndYield([
+      'Foo',
+      'Bar',
+      'Content',
+      'Middle',
+      'Bar',
+      'Middle',
+    ]);
 
     // Make a quick update which will schedule low priority work to
     // update the middle content.
     ReactNoop.render(<Foo text="bar" step={1} />);
     ReactNoop.flushDeferredPri(30 + 5);
 
-    assertLog(['Foo', 'Bar']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar']);
 
     // The middle content is now pending rendering...
     ReactNoop.flushDeferredPri(30 + 25 + 5);
-    assertLog(['Content', 'Middle', 'Bar']); // One more Middle left.
+    expect(Scheduler).toHaveYielded(['Content', 'Middle', 'Bar']); // One more Middle left.
 
     // but we'll interrupt it to render some higher priority work.
     // The middle content will bailout so it remains untouched.
     ReactNoop.render(<Foo text="foo" step={1} />);
     ReactNoop.flushDeferredPri(30);
 
-    assertLog(['Foo', 'Bar']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar']);
 
     // Since we did nothing to the middle subtree during the interruption,
     // we should be able to reuse the reconciliation work that we already did
     // without restarting.
-    await waitForAll(['Middle']);
+    expect(Scheduler).toFlushAndYield(['Middle']);
   });
 
-  it('memoizes work even if shouldComponentUpdate returns false', async () => {
+  it('memoizes work even if shouldComponentUpdate returns false', () => {
     class Foo extends React.Component {
       shouldComponentUpdate(nextProps) {
         // this.props is the memoized props. So this should return true for
         // every update except the first one.
         const shouldUpdate = this.props.step !== 1;
-        Scheduler.log('shouldComponentUpdate: ' + shouldUpdate);
+        Scheduler.unstable_yieldValue('shouldComponentUpdate: ' + shouldUpdate);
         return shouldUpdate;
       }
       render() {
-        Scheduler.log('render');
+        Scheduler.unstable_yieldValue('render');
         return <div />;
       }
     }
 
     ReactNoop.render(<Foo step={1} />);
-    await waitForAll(['render']);
+    expect(Scheduler).toFlushAndYield(['render']);
 
     ReactNoop.render(<Foo step={2} />);
-    await waitForAll(['shouldComponentUpdate: false']);
+    expect(Scheduler).toFlushAndYield(['shouldComponentUpdate: false']);
 
     ReactNoop.render(<Foo step={3} />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       // If the memoized props were not updated during last bail out, sCU will
       // keep returning false.
       'shouldComponentUpdate: true',
@@ -826,7 +874,7 @@ describe('ReactIncremental', () => {
     ]);
   });
 
-  it('can update in the middle of a tree using setState', async () => {
+  it('can update in the middle of a tree using setState', () => {
     let instance;
     class Bar extends React.Component {
       constructor() {
@@ -848,14 +896,14 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Foo />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(instance.state).toEqual({a: 'a'});
     instance.setState({b: 'b'});
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(instance.state).toEqual({a: 'a', b: 'b'});
   });
 
-  it('can queue multiple state updates', async () => {
+  it('can queue multiple state updates', () => {
     let instance;
     class Bar extends React.Component {
       constructor() {
@@ -877,16 +925,16 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Foo />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     // Call setState multiple times before flushing
     instance.setState({b: 'b'});
     instance.setState({c: 'c'});
     instance.setState({d: 'd'});
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(instance.state).toEqual({a: 'a', b: 'b', c: 'c', d: 'd'});
   });
 
-  it('can use updater form of setState', async () => {
+  it('can use updater form of setState', () => {
     let instance;
     class Bar extends React.Component {
       constructor() {
@@ -912,19 +960,19 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Foo multiplier={2} />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(instance.state.num).toEqual(1);
     instance.setState(updater);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(instance.state.num).toEqual(2);
 
     instance.setState(updater);
     ReactNoop.render(<Foo multiplier={3} />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(instance.state.num).toEqual(6);
   });
 
-  it('can call setState inside update callback', async () => {
+  it('can call setState inside update callback', () => {
     let instance;
     class Bar extends React.Component {
       constructor() {
@@ -954,15 +1002,15 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Foo multiplier={2} />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     instance.setState(updater);
     instance.setState(updater, callback);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(instance.state.num).toEqual(4);
     expect(instance.state.called).toEqual(true);
   });
 
-  it('can replaceState', async () => {
+  it('can replaceState', () => {
     let instance;
     class Bar extends React.Component {
       state = {a: 'a'};
@@ -981,17 +1029,17 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Foo />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     instance.setState({b: 'b'});
     instance.setState({c: 'c'});
     instance.updater.enqueueReplaceState(instance, {d: 'd'});
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(instance.state).toEqual({d: 'd'});
   });
 
-  it('can forceUpdate', async () => {
+  it('can forceUpdate', () => {
     function Baz() {
-      Scheduler.log('Baz');
+      Scheduler.unstable_yieldValue('Baz');
       return <div />;
     }
 
@@ -1005,13 +1053,13 @@ describe('ReactIncremental', () => {
         return false;
       }
       render() {
-        Scheduler.log('Bar');
+        Scheduler.unstable_yieldValue('Bar');
         return <Baz />;
       }
     }
 
     function Foo() {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return (
         <div>
           <Bar />
@@ -1020,32 +1068,32 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Foo />);
-    await waitForAll(['Foo', 'Bar', 'Baz']);
+    expect(Scheduler).toFlushAndYield(['Foo', 'Bar', 'Baz']);
     instance.forceUpdate();
-    await waitForAll(['Bar', 'Baz']);
+    expect(Scheduler).toFlushAndYield(['Bar', 'Baz']);
   });
 
-  it('should clear forceUpdate after update is flushed', async () => {
+  it('should clear forceUpdate after update is flushed', () => {
     let a = 0;
 
     class Foo extends React.PureComponent {
       render() {
         const msg = `A: ${a}, B: ${this.props.b}`;
-        Scheduler.log(msg);
+        Scheduler.unstable_yieldValue(msg);
         return msg;
       }
     }
 
     const foo = React.createRef(null);
     ReactNoop.render(<Foo ref={foo} b={0} />);
-    await waitForAll(['A: 0, B: 0']);
+    expect(Scheduler).toFlushAndYield(['A: 0, B: 0']);
 
     a = 1;
     foo.current.forceUpdate();
-    await waitForAll(['A: 1, B: 0']);
+    expect(Scheduler).toFlushAndYield(['A: 1, B: 0']);
 
     ReactNoop.render(<Foo ref={foo} b={0} />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushAndYield([]);
   });
 
   xit('can call sCU while resuming a partly mounted component', () => {
@@ -1061,13 +1109,13 @@ describe('ReactIncremental', () => {
         return this.props.x !== newProps.x || this.state.y !== newState.y;
       }
       render() {
-        Scheduler.log('Bar:' + this.props.x);
+        Scheduler.unstable_yieldValue('Bar:' + this.props.x);
         return <span prop={String(this.props.x === this.state.y)} />;
       }
     }
 
     function Foo(props) {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return [
         <Bar key="a" x="A" />,
         <Bar key="b" x={props.step === 0 ? 'B' : 'B2'} />,
@@ -1078,7 +1126,7 @@ describe('ReactIncremental', () => {
 
     ReactNoop.render(<Foo step={0} />);
     ReactNoop.flushDeferredPri(40);
-    assertLog(['Foo', 'Bar:A', 'Bar:B', 'Bar:C']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar:A', 'Bar:B', 'Bar:C']);
 
     expect(instances.size).toBe(3);
 
@@ -1087,13 +1135,13 @@ describe('ReactIncremental', () => {
     // A was memoized and reused. B was memoized but couldn't be reused because
     // props differences. C was memoized and reused. D never even started so it
     // needed a new instance.
-    assertLog(['Foo', 'Bar:B2', 'Bar:D']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar:B2', 'Bar:D']);
 
     // We expect each rerender to correspond to a new instance.
     expect(instances.size).toBe(4);
   });
 
-  xit('gets new props when setting state on a partly updated component', async () => {
+  xit('gets new props when setting state on a partly updated component', () => {
     const instances = [];
 
     class Bar extends React.Component {
@@ -1108,7 +1156,9 @@ describe('ReactIncremental', () => {
         });
       }
       render() {
-        Scheduler.log('Bar:' + this.props.x + '-' + this.props.step);
+        Scheduler.unstable_yieldValue(
+          'Bar:' + this.props.x + '-' + this.props.step,
+        );
         return <span prop={String(this.props.x === this.state.y)} />;
       }
     }
@@ -1116,12 +1166,12 @@ describe('ReactIncremental', () => {
     function Baz() {
       // This component is used as a sibling to Foo so that we can fully
       // complete Foo, without committing.
-      Scheduler.log('Baz');
+      Scheduler.unstable_yieldValue('Baz');
       return <div />;
     }
 
     function Foo(props) {
-      Scheduler.log('Foo');
+      Scheduler.unstable_yieldValue('Foo');
       return [
         <Bar key="a" x="A" step={props.step} />,
         <Bar key="b" x="B" step={props.step} />,
@@ -1135,7 +1185,7 @@ describe('ReactIncremental', () => {
         <Baz />
       </div>,
     );
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     // Flush part way through with new props, fully completing the first Bar.
     // However, it doesn't commit yet.
@@ -1147,30 +1197,32 @@ describe('ReactIncremental', () => {
       </div>,
     );
     ReactNoop.flushDeferredPri(45);
-    assertLog(['Foo', 'Bar:A-1', 'Bar:B-1', 'Baz']);
+    expect(Scheduler).toHaveYielded(['Foo', 'Bar:A-1', 'Bar:B-1', 'Baz']);
 
     // Make an update to the same Bar.
     instances[0].performAction();
 
-    await waitForAll(['Bar:A-1', 'Baz']);
+    expect(Scheduler).toFlushAndYield(['Bar:A-1', 'Baz']);
   });
 
-  xit('calls componentWillMount twice if the initial render is aborted', async () => {
+  xit('calls componentWillMount twice if the initial render is aborted', () => {
     class LifeCycle extends React.Component {
       state = {x: this.props.x};
       UNSAFE_componentWillReceiveProps(nextProps) {
-        Scheduler.log(
+        Scheduler.unstable_yieldValue(
           'componentWillReceiveProps:' + this.state.x + '-' + nextProps.x,
         );
         this.setState({x: nextProps.x});
       }
       UNSAFE_componentWillMount() {
-        Scheduler.log(
+        Scheduler.unstable_yieldValue(
           'componentWillMount:' + this.state.x + '-' + this.props.x,
         );
       }
       componentDidMount() {
-        Scheduler.log('componentDidMount:' + this.state.x + '-' + this.props.x);
+        Scheduler.unstable_yieldValue(
+          'componentDidMount:' + this.state.x + '-' + this.props.x,
+        );
       }
       render() {
         return <span />;
@@ -1178,12 +1230,12 @@ describe('ReactIncremental', () => {
     }
 
     function Trail() {
-      Scheduler.log('Trail');
+      Scheduler.unstable_yieldValue('Trail');
       return null;
     }
 
     function App(props) {
-      Scheduler.log('App');
+      Scheduler.unstable_yieldValue('App');
       return (
         <div>
           <LifeCycle x={props.x} />
@@ -1195,10 +1247,10 @@ describe('ReactIncremental', () => {
     ReactNoop.render(<App x={0} />);
     ReactNoop.flushDeferredPri(30);
 
-    assertLog(['App', 'componentWillMount:0-0']);
+    expect(Scheduler).toHaveYielded(['App', 'componentWillMount:0-0']);
 
     ReactNoop.render(<App x={1} />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'App',
       'componentWillReceiveProps:0-1',
       'componentWillMount:1-1',
@@ -1207,37 +1259,41 @@ describe('ReactIncremental', () => {
     ]);
   });
 
-  xit('uses state set in componentWillMount even if initial render was aborted', async () => {
+  xit('uses state set in componentWillMount even if initial render was aborted', () => {
     class LifeCycle extends React.Component {
       constructor(props) {
         super(props);
         this.state = {x: this.props.x + '(ctor)'};
       }
       UNSAFE_componentWillMount() {
-        Scheduler.log('componentWillMount:' + this.state.x);
+        Scheduler.unstable_yieldValue('componentWillMount:' + this.state.x);
         this.setState({x: this.props.x + '(willMount)'});
       }
       componentDidMount() {
-        Scheduler.log('componentDidMount:' + this.state.x);
+        Scheduler.unstable_yieldValue('componentDidMount:' + this.state.x);
       }
       render() {
-        Scheduler.log('render:' + this.state.x);
+        Scheduler.unstable_yieldValue('render:' + this.state.x);
         return <span />;
       }
     }
 
     function App(props) {
-      Scheduler.log('App');
+      Scheduler.unstable_yieldValue('App');
       return <LifeCycle x={props.x} />;
     }
 
     ReactNoop.render(<App x={0} />);
     ReactNoop.flushDeferredPri(20);
 
-    assertLog(['App', 'componentWillMount:0(ctor)', 'render:0(willMount)']);
+    expect(Scheduler).toHaveYielded([
+      'App',
+      'componentWillMount:0(ctor)',
+      'render:0(willMount)',
+    ]);
 
     ReactNoop.render(<App x={1} />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'App',
       'componentWillMount:0(willMount)',
       'render:1(willMount)',
@@ -1245,35 +1301,37 @@ describe('ReactIncremental', () => {
     ]);
   });
 
-  xit('calls componentWill* twice if an update render is aborted', async () => {
+  xit('calls componentWill* twice if an update render is aborted', () => {
     class LifeCycle extends React.Component {
       UNSAFE_componentWillMount() {
-        Scheduler.log('componentWillMount:' + this.props.x);
+        Scheduler.unstable_yieldValue('componentWillMount:' + this.props.x);
       }
       componentDidMount() {
-        Scheduler.log('componentDidMount:' + this.props.x);
+        Scheduler.unstable_yieldValue('componentDidMount:' + this.props.x);
       }
       UNSAFE_componentWillReceiveProps(nextProps) {
-        Scheduler.log(
+        Scheduler.unstable_yieldValue(
           'componentWillReceiveProps:' + this.props.x + '-' + nextProps.x,
         );
       }
       shouldComponentUpdate(nextProps) {
-        Scheduler.log(
+        Scheduler.unstable_yieldValue(
           'shouldComponentUpdate:' + this.props.x + '-' + nextProps.x,
         );
         return true;
       }
       UNSAFE_componentWillUpdate(nextProps) {
-        Scheduler.log(
+        Scheduler.unstable_yieldValue(
           'componentWillUpdate:' + this.props.x + '-' + nextProps.x,
         );
       }
       componentDidUpdate(prevProps) {
-        Scheduler.log('componentDidUpdate:' + this.props.x + '-' + prevProps.x);
+        Scheduler.unstable_yieldValue(
+          'componentDidUpdate:' + this.props.x + '-' + prevProps.x,
+        );
       }
       render() {
-        Scheduler.log('render:' + this.props.x);
+        Scheduler.unstable_yieldValue('render:' + this.props.x);
         return <span />;
       }
     }
@@ -1281,18 +1339,18 @@ describe('ReactIncremental', () => {
     function Sibling() {
       // The sibling is used to confirm that we've completed the first child,
       // but not yet flushed.
-      Scheduler.log('Sibling');
+      Scheduler.unstable_yieldValue('Sibling');
       return <span />;
     }
 
     function App(props) {
-      Scheduler.log('App');
+      Scheduler.unstable_yieldValue('App');
 
       return [<LifeCycle key="a" x={props.x} />, <Sibling key="b" />];
     }
 
     ReactNoop.render(<App x={0} />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'App',
       'componentWillMount:0',
       'render:0',
@@ -1303,7 +1361,7 @@ describe('ReactIncremental', () => {
     ReactNoop.render(<App x={1} />);
     ReactNoop.flushDeferredPri(30);
 
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       'App',
       'componentWillReceiveProps:0-1',
       'shouldComponentUpdate:0-1',
@@ -1314,7 +1372,7 @@ describe('ReactIncremental', () => {
     ]);
 
     ReactNoop.render(<App x={2} />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'App',
       'componentWillReceiveProps:1-2',
       'shouldComponentUpdate:1-2',
@@ -1326,34 +1384,34 @@ describe('ReactIncremental', () => {
     ]);
   });
 
-  it('calls getDerivedStateFromProps even for state-only updates', async () => {
+  it('calls getDerivedStateFromProps even for state-only updates', () => {
     let instance;
 
     class LifeCycle extends React.Component {
       state = {};
       static getDerivedStateFromProps(props, prevState) {
-        Scheduler.log('getDerivedStateFromProps');
+        Scheduler.unstable_yieldValue('getDerivedStateFromProps');
         return {foo: 'foo'};
       }
       changeState() {
         this.setState({foo: 'bar'});
       }
       componentDidUpdate() {
-        Scheduler.log('componentDidUpdate');
+        Scheduler.unstable_yieldValue('componentDidUpdate');
       }
       render() {
-        Scheduler.log('render');
+        Scheduler.unstable_yieldValue('render');
         instance = this;
         return null;
       }
     }
 
     ReactNoop.render(<LifeCycle />);
-    await waitForAll(['getDerivedStateFromProps', 'render']);
+    expect(Scheduler).toFlushAndYield(['getDerivedStateFromProps', 'render']);
     expect(instance.state).toEqual({foo: 'foo'});
 
     instance.changeState();
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'getDerivedStateFromProps',
       'render',
       'componentDidUpdate',
@@ -1361,36 +1419,40 @@ describe('ReactIncremental', () => {
     expect(instance.state).toEqual({foo: 'foo'});
   });
 
-  it('does not call getDerivedStateFromProps if neither state nor props have changed', async () => {
+  it('does not call getDerivedStateFromProps if neither state nor props have changed', () => {
     class Parent extends React.Component {
       state = {parentRenders: 0};
       static getDerivedStateFromProps(props, prevState) {
-        Scheduler.log('getDerivedStateFromProps');
+        Scheduler.unstable_yieldValue('getDerivedStateFromProps');
         return prevState.parentRenders + 1;
       }
       render() {
-        Scheduler.log('Parent');
+        Scheduler.unstable_yieldValue('Parent');
         return <Child parentRenders={this.state.parentRenders} ref={child} />;
       }
     }
 
     class Child extends React.Component {
       render() {
-        Scheduler.log('Child');
+        Scheduler.unstable_yieldValue('Child');
         return this.props.parentRenders;
       }
     }
 
     const child = React.createRef(null);
     ReactNoop.render(<Parent />);
-    await waitForAll(['getDerivedStateFromProps', 'Parent', 'Child']);
+    expect(Scheduler).toFlushAndYield([
+      'getDerivedStateFromProps',
+      'Parent',
+      'Child',
+    ]);
 
     // Schedule an update on the child. The parent should not re-render.
     child.current.setState({});
-    await waitForAll(['Child']);
+    expect(Scheduler).toFlushAndYield(['Child']);
   });
 
-  xit('does not call componentWillReceiveProps for state-only updates', async () => {
+  xit('does not call componentWillReceiveProps for state-only updates', () => {
     const instances = [];
 
     class LifeCycle extends React.Component {
@@ -1402,30 +1464,32 @@ describe('ReactIncremental', () => {
       }
       UNSAFE_componentWillMount() {
         instances.push(this);
-        Scheduler.log('componentWillMount:' + this.state.x);
+        Scheduler.unstable_yieldValue('componentWillMount:' + this.state.x);
       }
       componentDidMount() {
-        Scheduler.log('componentDidMount:' + this.state.x);
+        Scheduler.unstable_yieldValue('componentDidMount:' + this.state.x);
       }
       UNSAFE_componentWillReceiveProps(nextProps) {
-        Scheduler.log('componentWillReceiveProps');
+        Scheduler.unstable_yieldValue('componentWillReceiveProps');
       }
       shouldComponentUpdate(nextProps, nextState) {
-        Scheduler.log(
+        Scheduler.unstable_yieldValue(
           'shouldComponentUpdate:' + this.state.x + '-' + nextState.x,
         );
         return true;
       }
       UNSAFE_componentWillUpdate(nextProps, nextState) {
-        Scheduler.log(
+        Scheduler.unstable_yieldValue(
           'componentWillUpdate:' + this.state.x + '-' + nextState.x,
         );
       }
       componentDidUpdate(prevProps, prevState) {
-        Scheduler.log('componentDidUpdate:' + this.state.x + '-' + prevState.x);
+        Scheduler.unstable_yieldValue(
+          'componentDidUpdate:' + this.state.x + '-' + prevState.x,
+        );
       }
       render() {
-        Scheduler.log('render:' + this.state.x);
+        Scheduler.unstable_yieldValue('render:' + this.state.x);
         return <span />;
       }
     }
@@ -1444,7 +1508,7 @@ describe('ReactIncremental', () => {
         });
       }
       render() {
-        Scheduler.log('Wrap');
+        Scheduler.unstable_yieldValue('Wrap');
         return <LifeCycle y={this.state.y} />;
       }
     }
@@ -1452,17 +1516,17 @@ describe('ReactIncremental', () => {
     function Sibling() {
       // The sibling is used to confirm that we've completed the first child,
       // but not yet flushed.
-      Scheduler.log('Sibling');
+      Scheduler.unstable_yieldValue('Sibling');
       return <span />;
     }
 
     function App(props) {
-      Scheduler.log('App');
+      Scheduler.unstable_yieldValue('App');
       return [<Wrap key="a" />, <Sibling key="b" />];
     }
 
     ReactNoop.render(<App y={0} />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'App',
       'Wrap',
       'componentWillMount:0',
@@ -1476,7 +1540,7 @@ describe('ReactIncremental', () => {
 
     ReactNoop.flushDeferredPri(25);
 
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       // no componentWillReceiveProps
       'shouldComponentUpdate:0-1',
       'componentWillUpdate:0-1',
@@ -1487,7 +1551,7 @@ describe('ReactIncremental', () => {
     // LifeCycle
     instances[1].tick();
 
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       // no componentWillReceiveProps
       'shouldComponentUpdate:1-2',
       'componentWillUpdate:1-2',
@@ -1502,7 +1566,7 @@ describe('ReactIncremental', () => {
 
     ReactNoop.flushDeferredPri(30);
 
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       'Wrap',
       'componentWillReceiveProps',
       'shouldComponentUpdate:2-2',
@@ -1514,7 +1578,7 @@ describe('ReactIncremental', () => {
     // Next we will update LifeCycle directly but not with new props.
     instances[1].tick();
 
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       // This should not trigger another componentWillReceiveProps because
       // we never got new props.
       'shouldComponentUpdate:2-3',
@@ -1527,36 +1591,36 @@ describe('ReactIncremental', () => {
     // incomplete parents.
   });
 
-  xit('skips will/DidUpdate when bailing unless an update was already in progress', async () => {
+  xit('skips will/DidUpdate when bailing unless an update was already in progress', () => {
     class LifeCycle extends React.Component {
       UNSAFE_componentWillMount() {
-        Scheduler.log('componentWillMount');
+        Scheduler.unstable_yieldValue('componentWillMount');
       }
       componentDidMount() {
-        Scheduler.log('componentDidMount');
+        Scheduler.unstable_yieldValue('componentDidMount');
       }
       UNSAFE_componentWillReceiveProps(nextProps) {
-        Scheduler.log('componentWillReceiveProps');
+        Scheduler.unstable_yieldValue('componentWillReceiveProps');
       }
       shouldComponentUpdate(nextProps) {
-        Scheduler.log('shouldComponentUpdate');
+        Scheduler.unstable_yieldValue('shouldComponentUpdate');
         // Bail
         return this.props.x !== nextProps.x;
       }
       UNSAFE_componentWillUpdate(nextProps) {
-        Scheduler.log('componentWillUpdate');
+        Scheduler.unstable_yieldValue('componentWillUpdate');
       }
       componentDidUpdate(prevProps) {
-        Scheduler.log('componentDidUpdate');
+        Scheduler.unstable_yieldValue('componentDidUpdate');
       }
       render() {
-        Scheduler.log('render');
+        Scheduler.unstable_yieldValue('render');
         return <span />;
       }
     }
 
     function Sibling() {
-      Scheduler.log('render sibling');
+      Scheduler.unstable_yieldValue('render sibling');
       return <span />;
     }
 
@@ -1565,7 +1629,7 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<App x={0} />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'componentWillMount',
       'render',
       'render sibling',
@@ -1574,7 +1638,7 @@ describe('ReactIncremental', () => {
 
     // Update to same props
     ReactNoop.render(<App x={0} />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'componentWillReceiveProps',
       'shouldComponentUpdate',
       // no componentWillUpdate
@@ -1587,7 +1651,7 @@ describe('ReactIncremental', () => {
     ReactNoop.render(<App x={1} />);
     ReactNoop.flushDeferredPri(30);
 
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       'componentWillReceiveProps',
       'shouldComponentUpdate',
       'componentWillUpdate',
@@ -1598,10 +1662,10 @@ describe('ReactIncremental', () => {
 
     // ...but we'll interrupt it to rerender the same props.
     ReactNoop.render(<App x={1} />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     // We can bail out this time, but we must call componentDidUpdate.
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       'componentWillReceiveProps',
       'shouldComponentUpdate',
       // no componentWillUpdate
@@ -1611,7 +1675,7 @@ describe('ReactIncremental', () => {
     ]);
   });
 
-  it('can nest batchedUpdates', async () => {
+  it('can nest batchedUpdates', () => {
     let instance;
 
     class Foo extends React.Component {
@@ -1623,24 +1687,32 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Foo />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     ReactNoop.flushSync(() => {
       ReactNoop.batchedUpdates(() => {
-        instance.setState({n: 1}, () => Scheduler.log('setState 1'));
-        instance.setState({n: 2}, () => Scheduler.log('setState 2'));
+        instance.setState({n: 1}, () =>
+          Scheduler.unstable_yieldValue('setState 1'),
+        );
+        instance.setState({n: 2}, () =>
+          Scheduler.unstable_yieldValue('setState 2'),
+        );
         ReactNoop.batchedUpdates(() => {
-          instance.setState({n: 3}, () => Scheduler.log('setState 3'));
-          instance.setState({n: 4}, () => Scheduler.log('setState 4'));
-          Scheduler.log('end inner batchedUpdates');
+          instance.setState({n: 3}, () =>
+            Scheduler.unstable_yieldValue('setState 3'),
+          );
+          instance.setState({n: 4}, () =>
+            Scheduler.unstable_yieldValue('setState 4'),
+          );
+          Scheduler.unstable_yieldValue('end inner batchedUpdates');
         });
-        Scheduler.log('end outer batchedUpdates');
+        Scheduler.unstable_yieldValue('end outer batchedUpdates');
       });
     });
 
     // ReactNoop.flush() not needed because updates are synchronous
 
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       'end inner batchedUpdates',
       'end outer batchedUpdates',
       'setState 1',
@@ -1651,7 +1723,7 @@ describe('ReactIncremental', () => {
     expect(instance.state.n).toEqual(4);
   });
 
-  it('can handle if setState callback throws', async () => {
+  it('can handle if setState callback throws', () => {
     let instance;
 
     class Foo extends React.Component {
@@ -1663,28 +1735,33 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Foo />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     function updater({n}) {
       return {n: n + 1};
     }
 
-    instance.setState(updater, () => Scheduler.log('first callback'));
+    instance.setState(updater, () =>
+      Scheduler.unstable_yieldValue('first callback'),
+    );
     instance.setState(updater, () => {
-      Scheduler.log('second callback');
+      Scheduler.unstable_yieldValue('second callback');
       throw new Error('callback error');
     });
-    instance.setState(updater, () => Scheduler.log('third callback'));
+    instance.setState(updater, () =>
+      Scheduler.unstable_yieldValue('third callback'),
+    );
 
-    await waitForThrow('callback error');
+    expect(() => {
+      expect(Scheduler).toFlushWithoutYielding();
+    }).toThrow('callback error');
 
     // The third callback isn't called because the second one throws
-    assertLog(['first callback', 'second callback']);
+    expect(Scheduler).toHaveYielded(['first callback', 'second callback']);
     expect(instance.state.n).toEqual(3);
   });
 
-  // @gate !disableLegacyContext
-  it('merges and masks context', async () => {
+  it('merges and masks context', () => {
     class Intl extends React.Component {
       static childContextTypes = {
         locale: PropTypes.string,
@@ -1695,7 +1772,7 @@ describe('ReactIncremental', () => {
         };
       }
       render() {
-        Scheduler.log('Intl ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue('Intl ' + JSON.stringify(this.context));
         return this.props.children;
       }
     }
@@ -1710,7 +1787,7 @@ describe('ReactIncremental', () => {
         };
       }
       render() {
-        Scheduler.log('Router ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue('Router ' + JSON.stringify(this.context));
         return this.props.children;
       }
     }
@@ -1720,7 +1797,9 @@ describe('ReactIncremental', () => {
         locale: PropTypes.string,
       };
       render() {
-        Scheduler.log('ShowLocale ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'ShowLocale ' + JSON.stringify(this.context),
+        );
         return this.context.locale;
       }
     }
@@ -1730,13 +1809,15 @@ describe('ReactIncremental', () => {
         route: PropTypes.string,
       };
       render() {
-        Scheduler.log('ShowRoute ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'ShowRoute ' + JSON.stringify(this.context),
+        );
         return this.context.route;
       }
     }
 
     function ShowBoth(props, context) {
-      Scheduler.log('ShowBoth ' + JSON.stringify(context));
+      Scheduler.unstable_yieldValue('ShowBoth ' + JSON.stringify(context));
       return `${context.route} in ${context.locale}`;
     }
     ShowBoth.contextTypes = {
@@ -1746,14 +1827,18 @@ describe('ReactIncremental', () => {
 
     class ShowNeither extends React.Component {
       render() {
-        Scheduler.log('ShowNeither ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'ShowNeither ' + JSON.stringify(this.context),
+        );
         return null;
       }
     }
 
     class Indirection extends React.Component {
       render() {
-        Scheduler.log('Indirection ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'Indirection ' + JSON.stringify(this.context),
+        );
         return [
           <ShowLocale key="a" />,
           <ShowRoute key="b" />,
@@ -1774,7 +1859,7 @@ describe('ReactIncremental', () => {
         </div>
       </Intl>,
     );
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'Intl {}',
       'ShowLocale {"locale":"fr"}',
       'ShowBoth {"locale":"fr"}',
@@ -1788,12 +1873,23 @@ describe('ReactIncremental', () => {
         </div>
       </Intl>,
     );
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'Intl {}',
       'ShowLocale {"locale":"de"}',
       'ShowBoth {"locale":"de"}',
     ]);
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(
+          <Intl locale="sv">
+            <ShowLocale />
+            <div>
+              <ShowBoth />
+            </div>
+          </Intl>,
+        );
+      });
+    } else {
       ReactNoop.render(
         <Intl locale="sv">
           <ShowLocale />
@@ -1802,8 +1898,8 @@ describe('ReactIncremental', () => {
           </div>
         </Intl>,
       );
-    });
-    await waitFor(['Intl {}']);
+    }
+    expect(Scheduler).toFlushAndYieldThrough(['Intl {}']);
 
     ReactNoop.render(
       <Intl locale="en">
@@ -1814,7 +1910,7 @@ describe('ReactIncremental', () => {
         <ShowBoth />
       </Intl>,
     );
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'ShowLocale {"locale":"sv"}',
       'ShowBoth {"locale":"sv"}',
       'Intl {}',
@@ -1831,11 +1927,7 @@ describe('ReactIncremental', () => {
     ]);
   });
 
-  // @gate !disableLegacyContext
-  it('does not leak own context into context provider', async () => {
-    if (gate(flags => flags.disableLegacyContext)) {
-      throw new Error('This test infinite loops when context is disabled.');
-    }
+  it('does not leak own context into context provider', () => {
     class Recurse extends React.Component {
       static contextTypes = {
         n: PropTypes.number,
@@ -1847,7 +1939,9 @@ describe('ReactIncremental', () => {
         return {n: (this.context.n || 3) - 1};
       }
       render() {
-        Scheduler.log('Recurse ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'Recurse ' + JSON.stringify(this.context),
+        );
         if (this.context.n === 0) {
           return null;
         }
@@ -1856,7 +1950,7 @@ describe('ReactIncremental', () => {
     }
 
     ReactNoop.render(<Recurse />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'Recurse {}',
       'Recurse {"n":2}',
       'Recurse {"n":1}',
@@ -1864,51 +1958,49 @@ describe('ReactIncremental', () => {
     ]);
   });
 
-  // @gate !disableModulePatternComponents
-  // @gate !disableLegacyContext
-  it('does not leak own context into context provider (factory components)', async () => {
-    function Recurse(props, context) {
-      return {
-        getChildContext() {
-          return {n: (context.n || 3) - 1};
-        },
-        render() {
-          Scheduler.log('Recurse ' + JSON.stringify(context));
-          if (context.n === 0) {
-            return null;
-          }
-          return <Recurse />;
-        },
+  if (!require('shared/ReactFeatureFlags').disableModulePatternComponents) {
+    it('does not leak own context into context provider (factory components)', () => {
+      function Recurse(props, context) {
+        return {
+          getChildContext() {
+            return {n: (context.n || 3) - 1};
+          },
+          render() {
+            Scheduler.unstable_yieldValue('Recurse ' + JSON.stringify(context));
+            if (context.n === 0) {
+              return null;
+            }
+            return <Recurse />;
+          },
+        };
+      }
+      Recurse.contextTypes = {
+        n: PropTypes.number,
       };
-    }
-    Recurse.contextTypes = {
-      n: PropTypes.number,
-    };
-    Recurse.childContextTypes = {
-      n: PropTypes.number,
-    };
+      Recurse.childContextTypes = {
+        n: PropTypes.number,
+      };
 
-    ReactNoop.render(<Recurse />);
-    await expect(
-      async () =>
-        await waitForAll([
+      ReactNoop.render(<Recurse />);
+      expect(() =>
+        expect(Scheduler).toFlushAndYield([
           'Recurse {}',
           'Recurse {"n":2}',
           'Recurse {"n":1}',
           'Recurse {"n":0}',
         ]),
-    ).toErrorDev([
-      'Warning: The <Recurse /> component appears to be a function component that returns a class instance. ' +
-        'Change Recurse to a class that extends React.Component instead. ' +
-        "If you can't use a class try assigning the prototype on the function as a workaround. " +
-        '`Recurse.prototype = React.Component.prototype`. ' +
-        "Don't use an arrow function since it cannot be called with `new` by React.",
-    ]);
-  });
+      ).toErrorDev([
+        'Warning: The <Recurse /> component appears to be a function component that returns a class instance. ' +
+          'Change Recurse to a class that extends React.Component instead. ' +
+          "If you can't use a class try assigning the prototype on the function as a workaround. " +
+          '`Recurse.prototype = React.Component.prototype`. ' +
+          "Don't use an arrow function since it cannot be called with `new` by React.",
+      ]);
+    });
+  }
 
   // @gate www
-  // @gate !disableLegacyContext
-  it('provides context when reusing work', async () => {
+  it('provides context when reusing work', () => {
     class Intl extends React.Component {
       static childContextTypes = {
         locale: PropTypes.string,
@@ -1919,7 +2011,7 @@ describe('ReactIncremental', () => {
         };
       }
       render() {
-        Scheduler.log('Intl ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue('Intl ' + JSON.stringify(this.context));
         return this.props.children;
       }
     }
@@ -1929,12 +2021,29 @@ describe('ReactIncremental', () => {
         locale: PropTypes.string,
       };
       render() {
-        Scheduler.log('ShowLocale ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'ShowLocale ' + JSON.stringify(this.context),
+        );
         return this.context.locale;
       }
     }
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(
+          <Intl locale="fr">
+            <ShowLocale />
+            <LegacyHiddenDiv mode="hidden">
+              <ShowLocale />
+              <Intl locale="ru">
+                <ShowLocale />
+              </Intl>
+            </LegacyHiddenDiv>
+            <ShowLocale />
+          </Intl>,
+        );
+      });
+    } else {
       ReactNoop.render(
         <Intl locale="fr">
           <ShowLocale />
@@ -1947,23 +2056,21 @@ describe('ReactIncremental', () => {
           <ShowLocale />
         </Intl>,
       );
-    });
-
-    await waitFor([
+    }
+    expect(Scheduler).toFlushAndYieldThrough([
       'Intl {}',
       'ShowLocale {"locale":"fr"}',
       'ShowLocale {"locale":"fr"}',
     ]);
 
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'ShowLocale {"locale":"fr"}',
       'Intl {}',
       'ShowLocale {"locale":"ru"}',
     ]);
   });
 
-  // @gate !disableLegacyContext
-  it('reads context when setState is below the provider', async () => {
+  it('reads context when setState is below the provider', () => {
     let statefulInst;
 
     class Intl extends React.Component {
@@ -1974,11 +2081,15 @@ describe('ReactIncremental', () => {
         const childContext = {
           locale: this.props.locale,
         };
-        Scheduler.log('Intl:provide ' + JSON.stringify(childContext));
+        Scheduler.unstable_yieldValue(
+          'Intl:provide ' + JSON.stringify(childContext),
+        );
         return childContext;
       }
       render() {
-        Scheduler.log('Intl:read ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'Intl:read ' + JSON.stringify(this.context),
+        );
         return this.props.children;
       }
     }
@@ -1988,13 +2099,17 @@ describe('ReactIncremental', () => {
         locale: PropTypes.string,
       };
       render() {
-        Scheduler.log('ShowLocaleClass:read ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'ShowLocaleClass:read ' + JSON.stringify(this.context),
+        );
         return this.context.locale;
       }
     }
 
     function ShowLocaleFn(props, context) {
-      Scheduler.log('ShowLocaleFn:read ' + JSON.stringify(context));
+      Scheduler.unstable_yieldValue(
+        'ShowLocaleFn:read ' + JSON.stringify(context),
+      );
       return context.locale;
     }
     ShowLocaleFn.contextTypes = {
@@ -2010,13 +2125,15 @@ describe('ReactIncremental', () => {
     }
 
     function IndirectionFn(props, context) {
-      Scheduler.log('IndirectionFn ' + JSON.stringify(context));
+      Scheduler.unstable_yieldValue('IndirectionFn ' + JSON.stringify(context));
       return props.children;
     }
 
     class IndirectionClass extends React.Component {
       render() {
-        Scheduler.log('IndirectionClass ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'IndirectionClass ' + JSON.stringify(this.context),
+        );
         return this.props.children;
       }
     }
@@ -2033,7 +2150,7 @@ describe('ReactIncremental', () => {
         </IndirectionFn>
       </Intl>,
     );
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'Intl:read {}',
       'Intl:provide {"locale":"fr"}',
       'IndirectionFn {}',
@@ -2043,14 +2160,13 @@ describe('ReactIncremental', () => {
     ]);
 
     statefulInst.setState({x: 1});
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     // All work has been memoized because setState()
     // happened below the context and could not have affected it.
-    assertLog([]);
+    expect(Scheduler).toHaveYielded([]);
   });
 
-  // @gate !disableLegacyContext
-  it('reads context when setState is above the provider', async () => {
+  it('reads context when setState is above the provider', () => {
     let statefulInst;
 
     class Intl extends React.Component {
@@ -2061,11 +2177,15 @@ describe('ReactIncremental', () => {
         const childContext = {
           locale: this.props.locale,
         };
-        Scheduler.log('Intl:provide ' + JSON.stringify(childContext));
+        Scheduler.unstable_yieldValue(
+          'Intl:provide ' + JSON.stringify(childContext),
+        );
         return childContext;
       }
       render() {
-        Scheduler.log('Intl:read ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'Intl:read ' + JSON.stringify(this.context),
+        );
         return this.props.children;
       }
     }
@@ -2075,13 +2195,17 @@ describe('ReactIncremental', () => {
         locale: PropTypes.string,
       };
       render() {
-        Scheduler.log('ShowLocaleClass:read ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'ShowLocaleClass:read ' + JSON.stringify(this.context),
+        );
         return this.context.locale;
       }
     }
 
     function ShowLocaleFn(props, context) {
-      Scheduler.log('ShowLocaleFn:read ' + JSON.stringify(context));
+      Scheduler.unstable_yieldValue(
+        'ShowLocaleFn:read ' + JSON.stringify(context),
+      );
       return context.locale;
     }
     ShowLocaleFn.contextTypes = {
@@ -2089,13 +2213,15 @@ describe('ReactIncremental', () => {
     };
 
     function IndirectionFn(props, context) {
-      Scheduler.log('IndirectionFn ' + JSON.stringify(context));
+      Scheduler.unstable_yieldValue('IndirectionFn ' + JSON.stringify(context));
       return props.children;
     }
 
     class IndirectionClass extends React.Component {
       render() {
-        Scheduler.log('IndirectionClass ' + JSON.stringify(this.context));
+        Scheduler.unstable_yieldValue(
+          'IndirectionClass ' + JSON.stringify(this.context),
+        );
         return this.props.children;
       }
     }
@@ -2118,7 +2244,7 @@ describe('ReactIncremental', () => {
         </IndirectionFn>
       </Stateful>,
     );
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'Intl:read {}',
       'Intl:provide {"locale":"fr"}',
       'IndirectionFn {}',
@@ -2128,7 +2254,7 @@ describe('ReactIncremental', () => {
     ]);
 
     statefulInst.setState({locale: 'gr'});
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       // Intl is below setState() so it might have been
       // affected by it. Therefore we re-render and recompute
       // its child context.
@@ -2144,8 +2270,7 @@ describe('ReactIncremental', () => {
     ]);
   });
 
-  // @gate !disableLegacyContext || !__DEV__
-  it('maintains the correct context when providers bail out due to low priority', async () => {
+  it('maintains the correct context when providers bail out due to low priority', () => {
     class Root extends React.Component {
       render() {
         return <Middle {...this.props} />;
@@ -2181,15 +2306,14 @@ describe('ReactIncremental', () => {
 
     // Init
     ReactNoop.render(<Root />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     // Trigger an update in the middle of the tree
     instance.setState({});
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
   });
 
-  // @gate !disableLegacyContext || !__DEV__
-  it('maintains the correct context when unwinding due to an error in render', async () => {
+  it('maintains the correct context when unwinding due to an error in render', () => {
     class Root extends React.Component {
       componentDidCatch(error) {
         // If context is pushed/popped correctly,
@@ -2228,50 +2352,49 @@ describe('ReactIncremental', () => {
 
     // Init
     ReactNoop.render(<Root />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     // Trigger an update in the middle of the tree
     // This is necessary to reproduce the error as it currently exists.
     instance.setState({
       throwError: true,
     });
-    await expect(async () => await waitForAll([])).toErrorDev(
+    expect(() => expect(Scheduler).toFlushWithoutYielding()).toErrorDev(
       'Error boundaries should implement getDerivedStateFromError()',
     );
   });
 
-  // @gate !disableLegacyContext || !__DEV__
-  it('should not recreate masked context unless inputs have changed', async () => {
+  it('should not recreate masked context unless inputs have changed', () => {
     let scuCounter = 0;
 
     class MyComponent extends React.Component {
       static contextTypes = {};
       componentDidMount(prevProps, prevState) {
-        Scheduler.log('componentDidMount');
+        Scheduler.unstable_yieldValue('componentDidMount');
         this.setState({setStateInCDU: true});
       }
       componentDidUpdate(prevProps, prevState) {
-        Scheduler.log('componentDidUpdate');
+        Scheduler.unstable_yieldValue('componentDidUpdate');
         if (this.state.setStateInCDU) {
           this.setState({setStateInCDU: false});
         }
       }
       UNSAFE_componentWillReceiveProps(nextProps) {
-        Scheduler.log('componentWillReceiveProps');
+        Scheduler.unstable_yieldValue('componentWillReceiveProps');
         this.setState({setStateInCDU: true});
       }
       render() {
-        Scheduler.log('render');
+        Scheduler.unstable_yieldValue('render');
         return null;
       }
       shouldComponentUpdate(nextProps, nextState) {
-        Scheduler.log('shouldComponentUpdate');
+        Scheduler.unstable_yieldValue('shouldComponentUpdate');
         return scuCounter++ < 5; // Don't let test hang
       }
     }
 
     ReactNoop.render(<MyComponent />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'render',
       'componentDidMount',
       'shouldComponentUpdate',
@@ -2283,7 +2406,7 @@ describe('ReactIncremental', () => {
     ]);
   });
 
-  xit('should reuse memoized work if pointers are updated before calling lifecycles', async () => {
+  xit('should reuse memoized work if pointers are updated before calling lifecycles', () => {
     const cduNextProps = [];
     const cduPrevProps = [];
     const scuNextProps = [];
@@ -2332,7 +2455,7 @@ describe('ReactIncremental', () => {
     // Initial render of the entire tree.
     // Renders: Root, Middle, FirstChild, SecondChild
     ReactNoop.render(<Root>A</Root>);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     expect(renderCounter).toBe(1);
 
@@ -2354,7 +2477,7 @@ describe('ReactIncremental', () => {
     // The in-progress child content will bailout.
     // Renders: Root, Middle, FirstChild, SecondChild
     ReactNoop.render(<Root>B</Root>);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     // At this point the higher priority render has completed.
     // Since FirstChild props didn't change, sCU returned false.
@@ -2366,8 +2489,7 @@ describe('ReactIncremental', () => {
     expect(cduNextProps).toEqual([{children: 'B'}]);
   });
 
-  // @gate !disableLegacyContext
-  it('updates descendants with new context values', async () => {
+  it('updates descendants with new context values', () => {
     let instance;
 
     class TopContextProvider extends React.Component {
@@ -2398,7 +2520,7 @@ describe('ReactIncremental', () => {
         count: PropTypes.number,
       };
       render = () => {
-        Scheduler.log(`count:${this.context.count}`);
+        Scheduler.unstable_yieldValue(`count:${this.context.count}`);
         return null;
       };
     }
@@ -2411,13 +2533,12 @@ describe('ReactIncremental', () => {
       </TopContextProvider>,
     );
 
-    await waitForAll(['count:0']);
+    expect(Scheduler).toFlushAndYield(['count:0']);
     instance.updateCount();
-    await waitForAll(['count:1']);
+    expect(Scheduler).toFlushAndYield(['count:1']);
   });
 
-  // @gate !disableLegacyContext
-  it('updates descendants with multiple context-providing ancestors with new context values', async () => {
+  it('updates descendants with multiple context-providing ancestors with new context values', () => {
     let instance;
 
     class TopContextProvider extends React.Component {
@@ -2454,7 +2575,7 @@ describe('ReactIncremental', () => {
         count: PropTypes.number,
       };
       render = () => {
-        Scheduler.log(`count:${this.context.count}`);
+        Scheduler.unstable_yieldValue(`count:${this.context.count}`);
         return null;
       };
     }
@@ -2467,13 +2588,12 @@ describe('ReactIncremental', () => {
       </TopContextProvider>,
     );
 
-    await waitForAll(['count:0']);
+    expect(Scheduler).toFlushAndYield(['count:0']);
     instance.updateCount();
-    await waitForAll(['count:1']);
+    expect(Scheduler).toFlushAndYield(['count:1']);
   });
 
-  // @gate !disableLegacyContext
-  it('should not update descendants with new context values if shouldComponentUpdate returns false', async () => {
+  it('should not update descendants with new context values if shouldComponentUpdate returns false', () => {
     let instance;
 
     class TopContextProvider extends React.Component {
@@ -2517,7 +2637,7 @@ describe('ReactIncremental', () => {
         count: PropTypes.number,
       };
       render = () => {
-        Scheduler.log(`count:${this.context.count}`);
+        Scheduler.unstable_yieldValue(`count:${this.context.count}`);
         return null;
       };
     }
@@ -2532,13 +2652,12 @@ describe('ReactIncremental', () => {
       </TopContextProvider>,
     );
 
-    await waitForAll(['count:0']);
+    expect(Scheduler).toFlushAndYield(['count:0']);
     instance.updateCount();
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
   });
 
-  // @gate !disableLegacyContext
-  it('should update descendants with new context values if setState() is called in the middle of the tree', async () => {
+  it('should update descendants with new context values if setState() is called in the middle of the tree', () => {
     let middleInstance;
     let topInstance;
 
@@ -2592,7 +2711,9 @@ describe('ReactIncremental', () => {
         name: PropTypes.string,
       };
       render = () => {
-        Scheduler.log(`count:${this.context.count}, name:${this.context.name}`);
+        Scheduler.unstable_yieldValue(
+          `count:${this.context.count}, name:${this.context.name}`,
+        );
         return null;
       };
     }
@@ -2607,87 +2728,98 @@ describe('ReactIncremental', () => {
       </TopContextProvider>,
     );
 
-    await waitForAll(['count:0, name:brian']);
+    expect(Scheduler).toFlushAndYield(['count:0, name:brian']);
     topInstance.updateCount();
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     middleInstance.updateName('not brian');
-    await waitForAll(['count:1, name:not brian']);
+    expect(Scheduler).toFlushAndYield(['count:1, name:not brian']);
   });
 
-  it('does not interrupt for update at same priority', async () => {
+  it('does not interrupt for update at same priority', () => {
     function Parent(props) {
-      Scheduler.log('Parent: ' + props.step);
+      Scheduler.unstable_yieldValue('Parent: ' + props.step);
       return <Child step={props.step} />;
     }
 
     function Child(props) {
-      Scheduler.log('Child: ' + props.step);
+      Scheduler.unstable_yieldValue('Child: ' + props.step);
       return null;
     }
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Parent step={1} />);
+      });
+    } else {
       ReactNoop.render(<Parent step={1} />);
-    });
-    await waitFor(['Parent: 1']);
+    }
+    expect(Scheduler).toFlushAndYieldThrough(['Parent: 1']);
 
     // Interrupt at same priority
     ReactNoop.render(<Parent step={2} />);
 
-    await waitForAll(['Child: 1', 'Parent: 2', 'Child: 2']);
+    expect(Scheduler).toFlushAndYield(['Child: 1', 'Parent: 2', 'Child: 2']);
   });
 
-  it('does not interrupt for update at lower priority', async () => {
+  it('does not interrupt for update at lower priority', () => {
     function Parent(props) {
-      Scheduler.log('Parent: ' + props.step);
+      Scheduler.unstable_yieldValue('Parent: ' + props.step);
       return <Child step={props.step} />;
     }
 
     function Child(props) {
-      Scheduler.log('Child: ' + props.step);
+      Scheduler.unstable_yieldValue('Child: ' + props.step);
       return null;
     }
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Parent step={1} />);
+      });
+    } else {
       ReactNoop.render(<Parent step={1} />);
-    });
-    await waitFor(['Parent: 1']);
+    }
+    expect(Scheduler).toFlushAndYieldThrough(['Parent: 1']);
 
     // Interrupt at lower priority
     ReactNoop.expire(2000);
     ReactNoop.render(<Parent step={2} />);
 
-    await waitForAll(['Child: 1', 'Parent: 2', 'Child: 2']);
+    expect(Scheduler).toFlushAndYield(['Child: 1', 'Parent: 2', 'Child: 2']);
   });
 
-  it('does interrupt for update at higher priority', async () => {
+  it('does interrupt for update at higher priority', () => {
     function Parent(props) {
-      Scheduler.log('Parent: ' + props.step);
+      Scheduler.unstable_yieldValue('Parent: ' + props.step);
       return <Child step={props.step} />;
     }
 
     function Child(props) {
-      Scheduler.log('Child: ' + props.step);
+      Scheduler.unstable_yieldValue('Child: ' + props.step);
       return null;
     }
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Parent step={1} />);
+      });
+    } else {
       ReactNoop.render(<Parent step={1} />);
-    });
-    await waitFor(['Parent: 1']);
+    }
+    expect(Scheduler).toFlushAndYieldThrough(['Parent: 1']);
 
     // Interrupt at higher priority
     ReactNoop.flushSync(() => ReactNoop.render(<Parent step={2} />));
-    assertLog(['Parent: 2', 'Child: 2']);
+    expect(Scheduler).toHaveYielded(['Parent: 2', 'Child: 2']);
 
-    await waitForAll([]);
+    expect(Scheduler).toFlushAndYield([]);
   });
 
   // We sometimes use Maps with Fibers as keys.
-  // @gate !disableLegacyContext || !__DEV__
-  it('does not break with a bad Map polyfill', async () => {
+  it('does not break with a bad Map polyfill', () => {
     const realMapSet = Map.prototype.set;
 
-    async function triggerCodePathThatUsesFibersAsMapKeys() {
+    function triggerCodePathThatUsesFibersAsMapKeys() {
       function Thing() {
         throw new Error('No.');
       }
@@ -2710,8 +2842,8 @@ describe('ReactIncremental', () => {
           <Boundary />
         </React.StrictMode>,
       );
-      await expect(async () => {
-        await waitForAll([]);
+      expect(() => {
+        expect(Scheduler).toFlushWithoutYielding();
       }).toErrorDev([
         'Legacy context API has been detected within a strict-mode tree',
       ]);
@@ -2722,7 +2854,7 @@ describe('ReactIncremental', () => {
     jest.resetModules();
     let receivedNonExtensibleObjects;
     // eslint-disable-next-line no-extend-native
-    Map.prototype.set = function (key) {
+    Map.prototype.set = function(key) {
       if (typeof key === 'object' && key !== null) {
         if (!Object.isExtensible(key)) {
           receivedNonExtensibleObjects = true;
@@ -2733,15 +2865,9 @@ describe('ReactIncremental', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    let InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
-    waitFor = InternalTestUtils.waitFor;
-    waitForThrow = InternalTestUtils.waitForThrow;
-    assertLog = InternalTestUtils.assertLog;
-
     try {
       receivedNonExtensibleObjects = false;
-      await triggerCodePathThatUsesFibersAsMapKeys();
+      triggerCodePathThatUsesFibersAsMapKeys();
     } finally {
       // eslint-disable-next-line no-extend-native
       Map.prototype.set = realMapSet;
@@ -2756,7 +2882,7 @@ describe('ReactIncremental', () => {
     // doesn't cause a failure.
     jest.resetModules();
     // eslint-disable-next-line no-extend-native
-    Map.prototype.set = function (key, value) {
+    Map.prototype.set = function(key, value) {
       if (typeof key === 'object' && key !== null) {
         // A polyfill could do something like this.
         // It would throw if an object is not extensible.
@@ -2767,14 +2893,8 @@ describe('ReactIncremental', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
-    waitFor = InternalTestUtils.waitFor;
-    waitForThrow = InternalTestUtils.waitForThrow;
-    assertLog = InternalTestUtils.assertLog;
-
     try {
-      await triggerCodePathThatUsesFibersAsMapKeys();
+      triggerCodePathThatUsesFibersAsMapKeys();
     } finally {
       // eslint-disable-next-line no-extend-native
       Map.prototype.set = realMapSet;

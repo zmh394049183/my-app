@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -17,8 +17,6 @@ describe('ReactProfiler DevTools integration', () => {
   let Scheduler;
   let AdvanceTime;
   let hook;
-  let waitForAll;
-  let waitFor;
 
   beforeEach(() => {
     global.__REACT_DEVTOOLS_GLOBAL_HOOK__ = hook = {
@@ -35,10 +33,6 @@ describe('ReactProfiler DevTools integration', () => {
     Scheduler = require('scheduler');
     React = require('react');
     ReactTestRenderer = require('react-test-renderer');
-
-    const InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
-    waitFor = InternalTestUtils.waitFor;
 
     AdvanceTime = class extends React.Component {
       static defaultProps = {
@@ -144,9 +138,9 @@ describe('ReactProfiler DevTools integration', () => {
     ).toBe(7);
   });
 
-  it('regression test: #17159', async () => {
+  it('regression test: #17159', () => {
     function Text({text}) {
-      Scheduler.log(text);
+      Scheduler.unstable_yieldValue(text);
       return text;
     }
 
@@ -154,21 +148,25 @@ describe('ReactProfiler DevTools integration', () => {
 
     // Commit something
     root.update(<Text text="A" />);
-    await waitForAll(['A']);
+    expect(Scheduler).toFlushAndYield(['A']);
     expect(root).toMatchRenderedOutput('A');
 
     // Advance time by many seconds, larger than the default expiration time
     // for updates.
     Scheduler.unstable_advanceTime(10000);
     // Schedule an update.
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        root.update(<Text text="B" />);
+      });
+    } else {
       root.update(<Text text="B" />);
-    });
+    }
 
     // Update B should not instantly expire.
-    await waitFor([]);
+    expect(Scheduler).toFlushAndYieldThrough([]);
 
-    await waitForAll(['B']);
+    expect(Scheduler).toFlushAndYield(['B']);
     expect(root).toMatchRenderedOutput('B');
   });
 });

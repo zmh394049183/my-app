@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -21,10 +21,6 @@ let cancelCallback;
 let wrapCallback;
 let getCurrentPriorityLevel;
 let shouldYield;
-let waitForAll;
-let assertLog;
-let waitFor;
-let waitForPaint;
 
 describe('Scheduler', () => {
   beforeEach(() => {
@@ -44,114 +40,117 @@ describe('Scheduler', () => {
     wrapCallback = Scheduler.unstable_wrapCallback;
     getCurrentPriorityLevel = Scheduler.unstable_getCurrentPriorityLevel;
     shouldYield = Scheduler.unstable_shouldYield;
-
-    const InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
-    assertLog = InternalTestUtils.assertLog;
-    waitFor = InternalTestUtils.waitFor;
-    waitForPaint = InternalTestUtils.waitForPaint;
   });
 
-  it('flushes work incrementally', async () => {
-    scheduleCallback(NormalPriority, () => Scheduler.log('A'));
-    scheduleCallback(NormalPriority, () => Scheduler.log('B'));
-    scheduleCallback(NormalPriority, () => Scheduler.log('C'));
-    scheduleCallback(NormalPriority, () => Scheduler.log('D'));
+  it('flushes work incrementally', () => {
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('A'));
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('B'));
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('C'));
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('D'));
 
-    await waitFor(['A', 'B']);
-    await waitFor(['C']);
-    await waitForAll(['D']);
+    expect(Scheduler).toFlushAndYieldThrough(['A', 'B']);
+    expect(Scheduler).toFlushAndYieldThrough(['C']);
+    expect(Scheduler).toFlushAndYield(['D']);
   });
 
-  it('cancels work', async () => {
-    scheduleCallback(NormalPriority, () => Scheduler.log('A'));
+  it('cancels work', () => {
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('A'));
     const callbackHandleB = scheduleCallback(NormalPriority, () =>
-      Scheduler.log('B'),
+      Scheduler.unstable_yieldValue('B'),
     );
-    scheduleCallback(NormalPriority, () => Scheduler.log('C'));
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('C'));
 
     cancelCallback(callbackHandleB);
 
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'A',
       // B should have been cancelled
       'C',
     ]);
   });
 
-  it('executes the highest priority callbacks first', async () => {
-    scheduleCallback(NormalPriority, () => Scheduler.log('A'));
-    scheduleCallback(NormalPriority, () => Scheduler.log('B'));
+  it('executes the highest priority callbacks first', () => {
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('A'));
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('B'));
 
     // Yield before B is flushed
-    await waitFor(['A']);
+    expect(Scheduler).toFlushAndYieldThrough(['A']);
 
-    scheduleCallback(UserBlockingPriority, () => Scheduler.log('C'));
-    scheduleCallback(UserBlockingPriority, () => Scheduler.log('D'));
+    scheduleCallback(UserBlockingPriority, () =>
+      Scheduler.unstable_yieldValue('C'),
+    );
+    scheduleCallback(UserBlockingPriority, () =>
+      Scheduler.unstable_yieldValue('D'),
+    );
 
     // C and D should come first, because they are higher priority
-    await waitForAll(['C', 'D', 'B']);
+    expect(Scheduler).toFlushAndYield(['C', 'D', 'B']);
   });
 
-  it('expires work', async () => {
+  it('expires work', () => {
     scheduleCallback(NormalPriority, didTimeout => {
       Scheduler.unstable_advanceTime(100);
-      Scheduler.log(`A (did timeout: ${didTimeout})`);
+      Scheduler.unstable_yieldValue(`A (did timeout: ${didTimeout})`);
     });
     scheduleCallback(UserBlockingPriority, didTimeout => {
       Scheduler.unstable_advanceTime(100);
-      Scheduler.log(`B (did timeout: ${didTimeout})`);
+      Scheduler.unstable_yieldValue(`B (did timeout: ${didTimeout})`);
     });
     scheduleCallback(UserBlockingPriority, didTimeout => {
       Scheduler.unstable_advanceTime(100);
-      Scheduler.log(`C (did timeout: ${didTimeout})`);
+      Scheduler.unstable_yieldValue(`C (did timeout: ${didTimeout})`);
     });
 
     // Advance time, but not by enough to expire any work
     Scheduler.unstable_advanceTime(249);
-    assertLog([]);
+    expect(Scheduler).toHaveYielded([]);
 
     // Schedule a few more callbacks
     scheduleCallback(NormalPriority, didTimeout => {
       Scheduler.unstable_advanceTime(100);
-      Scheduler.log(`D (did timeout: ${didTimeout})`);
+      Scheduler.unstable_yieldValue(`D (did timeout: ${didTimeout})`);
     });
     scheduleCallback(NormalPriority, didTimeout => {
       Scheduler.unstable_advanceTime(100);
-      Scheduler.log(`E (did timeout: ${didTimeout})`);
+      Scheduler.unstable_yieldValue(`E (did timeout: ${didTimeout})`);
     });
 
     // Advance by just a bit more to expire the user blocking callbacks
     Scheduler.unstable_advanceTime(1);
-    await waitFor(['B (did timeout: true)', 'C (did timeout: true)']);
+    expect(Scheduler).toFlushAndYieldThrough([
+      'B (did timeout: true)',
+      'C (did timeout: true)',
+    ]);
 
     // Expire A
     Scheduler.unstable_advanceTime(4600);
-    await waitFor(['A (did timeout: true)']);
+    expect(Scheduler).toFlushAndYieldThrough(['A (did timeout: true)']);
 
     // Flush the rest without expiring
-    await waitForAll(['D (did timeout: false)', 'E (did timeout: true)']);
+    expect(Scheduler).toFlushAndYield([
+      'D (did timeout: false)',
+      'E (did timeout: true)',
+    ]);
   });
 
   it('has a default expiration of ~5 seconds', () => {
-    scheduleCallback(NormalPriority, () => Scheduler.log('A'));
+    scheduleCallback(NormalPriority, () => Scheduler.unstable_yieldValue('A'));
 
     Scheduler.unstable_advanceTime(4999);
-    assertLog([]);
+    expect(Scheduler).toHaveYielded([]);
 
     Scheduler.unstable_advanceTime(1);
-    Scheduler.unstable_flushExpired();
-    assertLog(['A']);
+    expect(Scheduler).toFlushExpired(['A']);
   });
 
-  it('continues working on same task after yielding', async () => {
+  it('continues working on same task after yielding', () => {
     scheduleCallback(NormalPriority, () => {
       Scheduler.unstable_advanceTime(100);
-      Scheduler.log('A');
+      Scheduler.unstable_yieldValue('A');
     });
     scheduleCallback(NormalPriority, () => {
       Scheduler.unstable_advanceTime(100);
-      Scheduler.log('B');
+      Scheduler.unstable_yieldValue('B');
     });
 
     let didYield = false;
@@ -164,7 +163,7 @@ describe('Scheduler', () => {
       while (tasks.length > 0) {
         const [label, ms] = tasks.shift();
         Scheduler.unstable_advanceTime(ms);
-        Scheduler.log(label);
+        Scheduler.unstable_yieldValue(label);
         if (shouldYield()) {
           didYield = true;
           return C;
@@ -176,23 +175,23 @@ describe('Scheduler', () => {
 
     scheduleCallback(NormalPriority, () => {
       Scheduler.unstable_advanceTime(100);
-      Scheduler.log('D');
+      Scheduler.unstable_yieldValue('D');
     });
     scheduleCallback(NormalPriority, () => {
       Scheduler.unstable_advanceTime(100);
-      Scheduler.log('E');
+      Scheduler.unstable_yieldValue('E');
     });
 
     // Flush, then yield while in the middle of C.
     expect(didYield).toBe(false);
-    await waitFor(['A', 'B', 'C1']);
+    expect(Scheduler).toFlushAndYieldThrough(['A', 'B', 'C1']);
     expect(didYield).toBe(true);
 
     // When we resume, we should continue working on C.
-    await waitForAll(['C2', 'C3', 'D', 'E']);
+    expect(Scheduler).toFlushAndYield(['C2', 'C3', 'D', 'E']);
   });
 
-  it('continuation callbacks inherit the expiration of the previous callback', async () => {
+  it('continuation callbacks inherit the expiration of the previous callback', () => {
     const tasks = [
       ['A', 125],
       ['B', 124],
@@ -203,7 +202,7 @@ describe('Scheduler', () => {
       while (tasks.length > 0) {
         const [label, ms] = tasks.shift();
         Scheduler.unstable_advanceTime(ms);
-        Scheduler.log(label);
+        Scheduler.unstable_yieldValue(label);
         if (shouldYield()) {
           return work;
         }
@@ -214,15 +213,14 @@ describe('Scheduler', () => {
     scheduleCallback(UserBlockingPriority, work);
 
     // Flush until just before the expiration time
-    await waitFor(['A', 'B']);
+    expect(Scheduler).toFlushAndYieldThrough(['A', 'B']);
 
     // Advance time by just a bit more. This should expire all the remaining work.
     Scheduler.unstable_advanceTime(1);
-    Scheduler.unstable_flushExpired();
-    assertLog(['C', 'D']);
+    expect(Scheduler).toFlushExpired(['C', 'D']);
   });
 
-  it('continuations are interrupted by higher priority work', async () => {
+  it('continuations are interrupted by higher priority work', () => {
     const tasks = [
       ['A', 100],
       ['B', 100],
@@ -233,27 +231,27 @@ describe('Scheduler', () => {
       while (tasks.length > 0) {
         const [label, ms] = tasks.shift();
         Scheduler.unstable_advanceTime(ms);
-        Scheduler.log(label);
+        Scheduler.unstable_yieldValue(label);
         if (tasks.length > 0 && shouldYield()) {
           return work;
         }
       }
     };
     scheduleCallback(NormalPriority, work);
-    await waitFor(['A']);
+    expect(Scheduler).toFlushAndYieldThrough(['A']);
 
     scheduleCallback(UserBlockingPriority, () => {
       Scheduler.unstable_advanceTime(100);
-      Scheduler.log('High pri');
+      Scheduler.unstable_yieldValue('High pri');
     });
 
-    await waitForAll(['High pri', 'B', 'C', 'D']);
+    expect(Scheduler).toFlushAndYield(['High pri', 'B', 'C', 'D']);
   });
 
   it(
     'continuations do not block higher priority work scheduled ' +
       'inside an executing callback',
-    async () => {
+    () => {
       const tasks = [
         ['A', 100],
         ['B', 100],
@@ -265,13 +263,13 @@ describe('Scheduler', () => {
           const task = tasks.shift();
           const [label, ms] = task;
           Scheduler.unstable_advanceTime(ms);
-          Scheduler.log(label);
+          Scheduler.unstable_yieldValue(label);
           if (label === 'B') {
             // Schedule high pri work from inside another callback
-            Scheduler.log('Schedule high pri');
+            Scheduler.unstable_yieldValue('Schedule high pri');
             scheduleCallback(UserBlockingPriority, () => {
               Scheduler.unstable_advanceTime(100);
-              Scheduler.log('High pri');
+              Scheduler.unstable_yieldValue('High pri');
             });
           }
           if (tasks.length > 0) {
@@ -281,7 +279,7 @@ describe('Scheduler', () => {
         }
       };
       scheduleCallback(NormalPriority, work);
-      await waitForAll([
+      expect(Scheduler).toFlushAndYield([
         'A',
         'B',
         'Schedule high pri',
@@ -295,43 +293,55 @@ describe('Scheduler', () => {
     },
   );
 
-  it('cancelling a continuation', async () => {
+  it('cancelling a continuation', () => {
     const task = scheduleCallback(NormalPriority, () => {
-      Scheduler.log('Yield');
+      Scheduler.unstable_yieldValue('Yield');
       return () => {
-        Scheduler.log('Continuation');
+        Scheduler.unstable_yieldValue('Continuation');
       };
     });
 
-    await waitFor(['Yield']);
+    expect(Scheduler).toFlushAndYieldThrough(['Yield']);
     cancelCallback(task);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
   });
 
   it('top-level immediate callbacks fire in a subsequent task', () => {
-    scheduleCallback(ImmediatePriority, () => Scheduler.log('A'));
-    scheduleCallback(ImmediatePriority, () => Scheduler.log('B'));
-    scheduleCallback(ImmediatePriority, () => Scheduler.log('C'));
-    scheduleCallback(ImmediatePriority, () => Scheduler.log('D'));
+    scheduleCallback(ImmediatePriority, () =>
+      Scheduler.unstable_yieldValue('A'),
+    );
+    scheduleCallback(ImmediatePriority, () =>
+      Scheduler.unstable_yieldValue('B'),
+    );
+    scheduleCallback(ImmediatePriority, () =>
+      Scheduler.unstable_yieldValue('C'),
+    );
+    scheduleCallback(ImmediatePriority, () =>
+      Scheduler.unstable_yieldValue('D'),
+    );
     // Immediate callback hasn't fired, yet.
-    assertLog([]);
+    expect(Scheduler).toHaveYielded([]);
     // They all flush immediately within the subsequent task.
-    Scheduler.unstable_flushExpired();
-    assertLog(['A', 'B', 'C', 'D']);
+    expect(Scheduler).toFlushExpired(['A', 'B', 'C', 'D']);
   });
 
   it('nested immediate callbacks are added to the queue of immediate callbacks', () => {
-    scheduleCallback(ImmediatePriority, () => Scheduler.log('A'));
+    scheduleCallback(ImmediatePriority, () =>
+      Scheduler.unstable_yieldValue('A'),
+    );
     scheduleCallback(ImmediatePriority, () => {
-      Scheduler.log('B');
+      Scheduler.unstable_yieldValue('B');
       // This callback should go to the end of the queue
-      scheduleCallback(ImmediatePriority, () => Scheduler.log('C'));
+      scheduleCallback(ImmediatePriority, () =>
+        Scheduler.unstable_yieldValue('C'),
+      );
     });
-    scheduleCallback(ImmediatePriority, () => Scheduler.log('D'));
-    assertLog([]);
+    scheduleCallback(ImmediatePriority, () =>
+      Scheduler.unstable_yieldValue('D'),
+    );
+    expect(Scheduler).toHaveYielded([]);
     // C should flush at the end
-    Scheduler.unstable_flushExpired();
-    assertLog(['A', 'B', 'D', 'C']);
+    expect(Scheduler).toFlushExpired(['A', 'B', 'D', 'C']);
   });
 
   it('wrapped callbacks have same signature as original callback', () => {
@@ -342,7 +352,7 @@ describe('Scheduler', () => {
   it('wrapped callbacks inherit the current priority', () => {
     const wrappedCallback = runWithPriority(NormalPriority, () =>
       wrapCallback(() => {
-        Scheduler.log(getCurrentPriorityLevel());
+        Scheduler.unstable_yieldValue(getCurrentPriorityLevel());
       }),
     );
 
@@ -350,15 +360,15 @@ describe('Scheduler', () => {
       UserBlockingPriority,
       () =>
         wrapCallback(() => {
-          Scheduler.log(getCurrentPriorityLevel());
+          Scheduler.unstable_yieldValue(getCurrentPriorityLevel());
         }),
     );
 
     wrappedCallback();
-    assertLog([NormalPriority]);
+    expect(Scheduler).toHaveYielded([NormalPriority]);
 
     wrappedUserBlockingCallback();
-    assertLog([UserBlockingPriority]);
+    expect(Scheduler).toHaveYielded([UserBlockingPriority]);
   });
 
   it('wrapped callbacks inherit the current priority even when nested', () => {
@@ -367,42 +377,42 @@ describe('Scheduler', () => {
 
     runWithPriority(NormalPriority, () => {
       wrappedCallback = wrapCallback(() => {
-        Scheduler.log(getCurrentPriorityLevel());
+        Scheduler.unstable_yieldValue(getCurrentPriorityLevel());
       });
       wrappedUserBlockingCallback = runWithPriority(UserBlockingPriority, () =>
         wrapCallback(() => {
-          Scheduler.log(getCurrentPriorityLevel());
+          Scheduler.unstable_yieldValue(getCurrentPriorityLevel());
         }),
       );
     });
 
     wrappedCallback();
-    assertLog([NormalPriority]);
+    expect(Scheduler).toHaveYielded([NormalPriority]);
 
     wrappedUserBlockingCallback();
-    assertLog([UserBlockingPriority]);
+    expect(Scheduler).toHaveYielded([UserBlockingPriority]);
   });
 
   it("immediate callbacks fire even if there's an error", () => {
     scheduleCallback(ImmediatePriority, () => {
-      Scheduler.log('A');
+      Scheduler.unstable_yieldValue('A');
       throw new Error('Oops A');
     });
     scheduleCallback(ImmediatePriority, () => {
-      Scheduler.log('B');
+      Scheduler.unstable_yieldValue('B');
     });
     scheduleCallback(ImmediatePriority, () => {
-      Scheduler.log('C');
+      Scheduler.unstable_yieldValue('C');
       throw new Error('Oops C');
     });
 
-    expect(() => Scheduler.unstable_flushExpired()).toThrow('Oops A');
-    assertLog(['A']);
+    expect(() => expect(Scheduler).toFlushExpired()).toThrow('Oops A');
+    expect(Scheduler).toHaveYielded(['A']);
 
     // B and C flush in a subsequent event. That way, the second error is not
     // swallowed.
-    expect(() => Scheduler.unstable_flushExpired()).toThrow('Oops C');
-    assertLog(['B', 'C']);
+    expect(() => expect(Scheduler).toFlushExpired()).toThrow('Oops C');
+    expect(Scheduler).toHaveYielded(['B', 'C']);
   });
 
   it('multiple immediate callbacks can throw and there will be an error for each one', () => {
@@ -418,19 +428,19 @@ describe('Scheduler', () => {
   });
 
   it('exposes the current priority level', () => {
-    Scheduler.log(getCurrentPriorityLevel());
+    Scheduler.unstable_yieldValue(getCurrentPriorityLevel());
     runWithPriority(ImmediatePriority, () => {
-      Scheduler.log(getCurrentPriorityLevel());
+      Scheduler.unstable_yieldValue(getCurrentPriorityLevel());
       runWithPriority(NormalPriority, () => {
-        Scheduler.log(getCurrentPriorityLevel());
+        Scheduler.unstable_yieldValue(getCurrentPriorityLevel());
         runWithPriority(UserBlockingPriority, () => {
-          Scheduler.log(getCurrentPriorityLevel());
+          Scheduler.unstable_yieldValue(getCurrentPriorityLevel());
         });
       });
-      Scheduler.log(getCurrentPriorityLevel());
+      Scheduler.unstable_yieldValue(getCurrentPriorityLevel());
     });
 
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       NormalPriority,
       ImmediatePriority,
       NormalPriority,
@@ -444,7 +454,7 @@ describe('Scheduler', () => {
     // priority if you have sourcemaps.
     // TODO: Feature temporarily disabled while we investigate a bug in one of
     // our minifiers.
-    it.skip('adds extra function to the JS stack whose name includes the priority level', async () => {
+    it.skip('adds extra function to the JS stack whose name includes the priority level', () => {
       function inferPriorityFromCallstack() {
         try {
           throw Error();
@@ -477,22 +487,28 @@ describe('Scheduler', () => {
       }
 
       scheduleCallback(ImmediatePriority, () =>
-        Scheduler.log('Immediate: ' + inferPriorityFromCallstack()),
+        Scheduler.unstable_yieldValue(
+          'Immediate: ' + inferPriorityFromCallstack(),
+        ),
       );
       scheduleCallback(UserBlockingPriority, () =>
-        Scheduler.log('UserBlocking: ' + inferPriorityFromCallstack()),
+        Scheduler.unstable_yieldValue(
+          'UserBlocking: ' + inferPriorityFromCallstack(),
+        ),
       );
       scheduleCallback(NormalPriority, () =>
-        Scheduler.log('Normal: ' + inferPriorityFromCallstack()),
+        Scheduler.unstable_yieldValue(
+          'Normal: ' + inferPriorityFromCallstack(),
+        ),
       );
       scheduleCallback(LowPriority, () =>
-        Scheduler.log('Low: ' + inferPriorityFromCallstack()),
+        Scheduler.unstable_yieldValue('Low: ' + inferPriorityFromCallstack()),
       );
       scheduleCallback(IdlePriority, () =>
-        Scheduler.log('Idle: ' + inferPriorityFromCallstack()),
+        Scheduler.unstable_yieldValue('Idle: ' + inferPriorityFromCallstack()),
       );
 
-      await waitForAll([
+      expect(Scheduler).toFlushAndYield([
         'Immediate: ' + ImmediatePriority,
         'UserBlocking: ' + UserBlockingPriority,
         'Normal: ' + NormalPriority,
@@ -503,99 +519,134 @@ describe('Scheduler', () => {
   }
 
   describe('delayed tasks', () => {
-    it('schedules a delayed task', async () => {
-      scheduleCallback(NormalPriority, () => Scheduler.log('A'), {
-        delay: 1000,
-      });
+    it('schedules a delayed task', () => {
+      scheduleCallback(
+        NormalPriority,
+        () => Scheduler.unstable_yieldValue('A'),
+        {
+          delay: 1000,
+        },
+      );
 
       // Should flush nothing, because delay hasn't elapsed
-      await waitForAll([]);
+      expect(Scheduler).toFlushAndYield([]);
 
       // Advance time until right before the threshold
       Scheduler.unstable_advanceTime(999);
       // Still nothing
-      await waitForAll([]);
+      expect(Scheduler).toFlushAndYield([]);
 
       // Advance time past the threshold
       Scheduler.unstable_advanceTime(1);
 
       // Now it should flush like normal
-      await waitForAll(['A']);
+      expect(Scheduler).toFlushAndYield(['A']);
     });
 
-    it('schedules multiple delayed tasks', async () => {
-      scheduleCallback(NormalPriority, () => Scheduler.log('C'), {
-        delay: 300,
-      });
+    it('schedules multiple delayed tasks', () => {
+      scheduleCallback(
+        NormalPriority,
+        () => Scheduler.unstable_yieldValue('C'),
+        {
+          delay: 300,
+        },
+      );
 
-      scheduleCallback(NormalPriority, () => Scheduler.log('B'), {
-        delay: 200,
-      });
+      scheduleCallback(
+        NormalPriority,
+        () => Scheduler.unstable_yieldValue('B'),
+        {
+          delay: 200,
+        },
+      );
 
-      scheduleCallback(NormalPriority, () => Scheduler.log('D'), {
-        delay: 400,
-      });
+      scheduleCallback(
+        NormalPriority,
+        () => Scheduler.unstable_yieldValue('D'),
+        {
+          delay: 400,
+        },
+      );
 
-      scheduleCallback(NormalPriority, () => Scheduler.log('A'), {
-        delay: 100,
-      });
+      scheduleCallback(
+        NormalPriority,
+        () => Scheduler.unstable_yieldValue('A'),
+        {
+          delay: 100,
+        },
+      );
 
       // Should flush nothing, because delay hasn't elapsed
-      await waitForAll([]);
+      expect(Scheduler).toFlushAndYield([]);
 
       // Advance some time.
       Scheduler.unstable_advanceTime(200);
       // Both A and B are no longer delayed. They can now flush incrementally.
-      await waitFor(['A']);
-      await waitForAll(['B']);
+      expect(Scheduler).toFlushAndYieldThrough(['A']);
+      expect(Scheduler).toFlushAndYield(['B']);
 
       // Advance the rest
       Scheduler.unstable_advanceTime(200);
-      await waitForAll(['C', 'D']);
+      expect(Scheduler).toFlushAndYield(['C', 'D']);
     });
 
-    it('interleaves normal tasks and delayed tasks', async () => {
+    it('interleaves normal tasks and delayed tasks', () => {
       // Schedule some high priority callbacks with a delay. When their delay
       // elapses, they will be the most important callback in the queue.
-      scheduleCallback(UserBlockingPriority, () => Scheduler.log('Timer 2'), {
-        delay: 300,
-      });
-      scheduleCallback(UserBlockingPriority, () => Scheduler.log('Timer 1'), {
-        delay: 100,
-      });
+      scheduleCallback(
+        UserBlockingPriority,
+        () => Scheduler.unstable_yieldValue('Timer 2'),
+        {delay: 300},
+      );
+      scheduleCallback(
+        UserBlockingPriority,
+        () => Scheduler.unstable_yieldValue('Timer 1'),
+        {delay: 100},
+      );
 
       // Schedule some tasks at default priority.
       scheduleCallback(NormalPriority, () => {
-        Scheduler.log('A');
+        Scheduler.unstable_yieldValue('A');
         Scheduler.unstable_advanceTime(100);
       });
       scheduleCallback(NormalPriority, () => {
-        Scheduler.log('B');
+        Scheduler.unstable_yieldValue('B');
         Scheduler.unstable_advanceTime(100);
       });
       scheduleCallback(NormalPriority, () => {
-        Scheduler.log('C');
+        Scheduler.unstable_yieldValue('C');
         Scheduler.unstable_advanceTime(100);
       });
       scheduleCallback(NormalPriority, () => {
-        Scheduler.log('D');
+        Scheduler.unstable_yieldValue('D');
         Scheduler.unstable_advanceTime(100);
       });
 
       // Flush all the work. The timers should be interleaved with the
       // other tasks.
-      await waitForAll(['A', 'Timer 1', 'B', 'C', 'Timer 2', 'D']);
+      expect(Scheduler).toFlushAndYield([
+        'A',
+        'Timer 1',
+        'B',
+        'C',
+        'Timer 2',
+        'D',
+      ]);
     });
 
-    it('interleaves delayed tasks with time-sliced tasks', async () => {
+    it('interleaves delayed tasks with time-sliced tasks', () => {
       // Schedule some high priority callbacks with a delay. When their delay
       // elapses, they will be the most important callback in the queue.
-      scheduleCallback(UserBlockingPriority, () => Scheduler.log('Timer 2'), {
-        delay: 300,
-      });
-      scheduleCallback(UserBlockingPriority, () => Scheduler.log('Timer 1'), {
-        delay: 100,
-      });
+      scheduleCallback(
+        UserBlockingPriority,
+        () => Scheduler.unstable_yieldValue('Timer 2'),
+        {delay: 300},
+      );
+      scheduleCallback(
+        UserBlockingPriority,
+        () => Scheduler.unstable_yieldValue('Timer 1'),
+        {delay: 100},
+      );
 
       // Schedule a time-sliced task at default priority.
       const tasks = [
@@ -609,7 +660,7 @@ describe('Scheduler', () => {
           const task = tasks.shift();
           const [label, ms] = task;
           Scheduler.unstable_advanceTime(ms);
-          Scheduler.log(label);
+          Scheduler.unstable_yieldValue(label);
           if (tasks.length > 0) {
             return work;
           }
@@ -619,27 +670,38 @@ describe('Scheduler', () => {
 
       // Flush all the work. The timers should be interleaved with the
       // other tasks.
-      await waitForAll(['A', 'Timer 1', 'B', 'C', 'Timer 2', 'D']);
+      expect(Scheduler).toFlushAndYield([
+        'A',
+        'Timer 1',
+        'B',
+        'C',
+        'Timer 2',
+        'D',
+      ]);
     });
 
-    it('cancels a delayed task', async () => {
+    it('cancels a delayed task', () => {
       // Schedule several tasks with the same delay
       const options = {delay: 100};
 
-      scheduleCallback(NormalPriority, () => Scheduler.log('A'), options);
+      scheduleCallback(
+        NormalPriority,
+        () => Scheduler.unstable_yieldValue('A'),
+        options,
+      );
       const taskB = scheduleCallback(
         NormalPriority,
-        () => Scheduler.log('B'),
+        () => Scheduler.unstable_yieldValue('B'),
         options,
       );
       const taskC = scheduleCallback(
         NormalPriority,
-        () => Scheduler.log('C'),
+        () => Scheduler.unstable_yieldValue('C'),
         options,
       );
 
       // Cancel B before its delay has elapsed
-      await waitForAll([]);
+      expect(Scheduler).toFlushAndYield([]);
       cancelCallback(taskB);
 
       // Cancel C after its delay has elapsed
@@ -647,71 +709,21 @@ describe('Scheduler', () => {
       cancelCallback(taskC);
 
       // Only A should flush
-      await waitForAll(['A']);
+      expect(Scheduler).toFlushAndYield(['A']);
     });
 
-    it('gracefully handles scheduled tasks that are not a function', async () => {
+    it('gracefully handles scheduled tasks that are not a function', () => {
       scheduleCallback(ImmediatePriority, null);
-      await waitForAll([]);
+      expect(Scheduler).toFlushWithoutYielding();
 
       scheduleCallback(ImmediatePriority, undefined);
-      await waitForAll([]);
+      expect(Scheduler).toFlushWithoutYielding();
 
       scheduleCallback(ImmediatePriority, {});
-      await waitForAll([]);
+      expect(Scheduler).toFlushWithoutYielding();
 
       scheduleCallback(ImmediatePriority, 42);
-      await waitForAll([]);
-    });
-
-    it('toFlushUntilNextPaint stops if a continuation is returned', async () => {
-      scheduleCallback(NormalPriority, () => {
-        Scheduler.log('Original Task');
-        Scheduler.log('shouldYield: ' + shouldYield());
-        Scheduler.log('Return a continuation');
-        return () => {
-          Scheduler.log('Continuation Task');
-        };
-      });
-
-      await waitForPaint([
-        'Original Task',
-        // Immediately before returning a continuation, `shouldYield` returns
-        // false, which means there must be time remaining in the frame.
-        'shouldYield: false',
-        'Return a continuation',
-
-        // The continuation should not flush yet.
-      ]);
-
-      // No time has elapsed
-      expect(Scheduler.unstable_now()).toBe(0);
-
-      // Continue the task
-      await waitForAll(['Continuation Task']);
-    });
-
-    it("toFlushAndYield keeps flushing even if there's a continuation", async () => {
-      scheduleCallback(NormalPriority, () => {
-        Scheduler.log('Original Task');
-        Scheduler.log('shouldYield: ' + shouldYield());
-        Scheduler.log('Return a continuation');
-        return () => {
-          Scheduler.log('Continuation Task');
-        };
-      });
-
-      await waitForAll([
-        'Original Task',
-        // Immediately before returning a continuation, `shouldYield` returns
-        // false, which means there must be time remaining in the frame.
-        'shouldYield: false',
-        'Return a continuation',
-
-        // The continuation should flush immediately, even though the task
-        // yielded a continuation.
-        'Continuation Task',
-      ]);
+      expect(Scheduler).toFlushWithoutYielding();
     });
   });
 });

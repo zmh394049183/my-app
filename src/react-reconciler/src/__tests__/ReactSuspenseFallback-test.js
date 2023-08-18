@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -13,7 +13,6 @@ let Suspense;
 let getCacheForType;
 let caches;
 let seededCache;
-let waitForAll;
 
 describe('ReactSuspenseFallback', () => {
   beforeEach(() => {
@@ -26,9 +25,6 @@ describe('ReactSuspenseFallback', () => {
     getCacheForType = React.unstable_getCacheForType;
     caches = [];
     seededCache = null;
-
-    const InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
   });
 
   function createTextCache() {
@@ -87,16 +83,16 @@ describe('ReactSuspenseFallback', () => {
     if (record !== undefined) {
       switch (record.status) {
         case 'pending':
-          Scheduler.log(`Suspend! [${text}]`);
+          Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
           throw record.value;
         case 'rejected':
-          Scheduler.log(`Error! [${text}]`);
+          Scheduler.unstable_yieldValue(`Error! [${text}]`);
           throw record.value;
         case 'resolved':
           return textCache.version;
       }
     } else {
-      Scheduler.log(`Suspend! [${text}]`);
+      Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
 
       const thenable = {
         pings: [],
@@ -120,61 +116,65 @@ describe('ReactSuspenseFallback', () => {
   }
 
   function Text({text}) {
-    Scheduler.log(text);
+    Scheduler.unstable_yieldValue(text);
     return <span prop={text} />;
   }
 
   function AsyncText({text, showVersion}) {
     const version = readText(text);
     const fullText = showVersion ? `${text} [v${version}]` : text;
-    Scheduler.log(fullText);
+    Scheduler.unstable_yieldValue(fullText);
     return <span prop={fullText} />;
   }
 
-  // @gate enableLegacyCache
-  it('suspends and shows fallback', async () => {
+  function span(prop) {
+    return {type: 'span', children: [], prop, hidden: false};
+  }
+
+  // @gate enableCache
+  it('suspends and shows fallback', () => {
     ReactNoop.render(
       <Suspense fallback={<Text text="Loading..." />}>
         <AsyncText text="A" ms={100} />
       </Suspense>,
     );
 
-    await waitForAll(['Suspend! [A]', 'Loading...']);
-    expect(ReactNoop).toMatchRenderedOutput(<span prop="Loading..." />);
+    expect(Scheduler).toFlushAndYield(['Suspend! [A]', 'Loading...']);
+    expect(ReactNoop.getChildren()).toEqual([span('Loading...')]);
   });
 
-  // @gate enableLegacyCache
-  it('suspends and shows null fallback', async () => {
+  // @gate enableCache
+  it('suspends and shows null fallback', () => {
     ReactNoop.render(
       <Suspense fallback={null}>
         <AsyncText text="A" ms={100} />
       </Suspense>,
     );
 
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'Suspend! [A]',
       // null
     ]);
-    expect(ReactNoop).toMatchRenderedOutput(null);
+    expect(ReactNoop.getChildren()).toEqual([]);
   });
 
-  // @gate enableLegacyCache
-  it('suspends and shows undefined fallback', async () => {
+  // @gate enableCache
+  it('suspends and shows undefined fallback', () => {
     ReactNoop.render(
       <Suspense>
         <AsyncText text="A" ms={100} />
       </Suspense>,
     );
 
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'Suspend! [A]',
       // null
     ]);
-    expect(ReactNoop).toMatchRenderedOutput(null);
+    expect(ReactNoop.getChildren()).toEqual([]);
   });
 
-  // @gate enableLegacyCache
-  it('suspends and shows inner fallback', async () => {
+  // @gate enableCache
+  it('suspends and shows inner fallback', () => {
     ReactNoop.render(
       <Suspense fallback={<Text text="Should not show..." />}>
         <Suspense fallback={<Text text="Loading..." />}>
@@ -183,12 +183,12 @@ describe('ReactSuspenseFallback', () => {
       </Suspense>,
     );
 
-    await waitForAll(['Suspend! [A]', 'Loading...']);
-    expect(ReactNoop).toMatchRenderedOutput(<span prop="Loading..." />);
+    expect(Scheduler).toFlushAndYield(['Suspend! [A]', 'Loading...']);
+    expect(ReactNoop.getChildren()).toEqual([span('Loading...')]);
   });
 
-  // @gate enableLegacyCache
-  it('suspends and shows inner undefined fallback', async () => {
+  // @gate enableCache
+  it('suspends and shows inner undefined fallback', () => {
     ReactNoop.render(
       <Suspense fallback={<Text text="Should not show..." />}>
         <Suspense>
@@ -197,15 +197,15 @@ describe('ReactSuspenseFallback', () => {
       </Suspense>,
     );
 
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'Suspend! [A]',
       // null
     ]);
-    expect(ReactNoop).toMatchRenderedOutput(null);
+    expect(ReactNoop.getChildren()).toEqual([]);
   });
 
-  // @gate enableLegacyCache
-  it('suspends and shows inner null fallback', async () => {
+  // @gate enableCache
+  it('suspends and shows inner null fallback', () => {
     ReactNoop.render(
       <Suspense fallback={<Text text="Should not show..." />}>
         <Suspense fallback={null}>
@@ -214,10 +214,10 @@ describe('ReactSuspenseFallback', () => {
       </Suspense>,
     );
 
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'Suspend! [A]',
       // null
     ]);
-    expect(ReactNoop).toMatchRenderedOutput(null);
+    expect(ReactNoop.getChildren()).toEqual([]);
   });
 });

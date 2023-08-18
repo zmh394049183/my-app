@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -64,16 +64,13 @@ describe('ReactCompositeComponent', () => {
     jest.resetModules();
     React = require('react');
     ReactDOM = require('react-dom');
-    ReactCurrentOwner =
-      require('react').__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED
-        .ReactCurrentOwner;
+    ReactCurrentOwner = require('react')
+      .__SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED.ReactCurrentOwner;
     ReactTestUtils = require('react-dom/test-utils');
     PropTypes = require('prop-types');
 
     MorphingComponent = class extends React.Component {
       state = {activated: false};
-
-      xRef = React.createRef();
 
       _toggleActivatedState = () => {
         this.setState({activated: !this.state.activated});
@@ -82,9 +79,9 @@ describe('ReactCompositeComponent', () => {
       render() {
         const toggleActivatedState = this._toggleActivatedState;
         return !this.state.activated ? (
-          <a ref={this.xRef} onClick={toggleActivatedState} />
+          <a ref="x" onClick={toggleActivatedState} />
         ) : (
-          <b ref={this.xRef} onClick={toggleActivatedState} />
+          <b ref="x" onClick={toggleActivatedState} />
         );
       }
     };
@@ -94,16 +91,14 @@ describe('ReactCompositeComponent', () => {
      * reallocated again.
      */
     ChildUpdates = class extends React.Component {
-      anchorRef = React.createRef();
-
       getAnchor = () => {
-        return this.anchorRef.current;
+        return this.refs.anch;
       };
 
       render() {
         const className = this.props.anchorClassOn ? 'anchorClass' : '';
         return this.props.renderAnchor ? (
-          <a ref={this.anchorRef} className={className} />
+          <a ref="anch" className={className} />
         ) : (
           <b />
         );
@@ -191,11 +186,11 @@ describe('ReactCompositeComponent', () => {
   it('should rewire refs when rendering to different child types', () => {
     const instance = ReactTestUtils.renderIntoDocument(<MorphingComponent />);
 
-    expect(instance.xRef.current.tagName).toBe('A');
+    expect(instance.refs.x.tagName).toBe('A');
     instance._toggleActivatedState();
-    expect(instance.xRef.current.tagName).toBe('B');
+    expect(instance.refs.x.tagName).toBe('B');
     instance._toggleActivatedState();
-    expect(instance.xRef.current.tagName).toBe('A');
+    expect(instance.refs.x.tagName).toBe('A');
   });
 
   it('should not cache old DOM nodes when switching constructors', () => {
@@ -379,7 +374,7 @@ describe('ReactCompositeComponent', () => {
 
       componentWillUnmount() {
         expect(() => {
-          this.setState({value: 2}, function () {
+          this.setState({value: 2}, function() {
             cbCalled = true;
           });
         }).not.toThrow();
@@ -587,7 +582,6 @@ describe('ReactCompositeComponent', () => {
     );
   });
 
-  // @gate !disableLegacyContext
   it('should pass context to children when not owner', () => {
     class Parent extends React.Component {
       render() {
@@ -653,7 +647,6 @@ describe('ReactCompositeComponent', () => {
     expect(childRenders).toBe(1);
   });
 
-  // @gate !disableLegacyContext
   it('should pass context when re-rendered for static child', () => {
     let parentInstance = null;
     let childInstance = null;
@@ -714,7 +707,6 @@ describe('ReactCompositeComponent', () => {
     expect(childInstance.context).toEqual({foo: 'bar', flag: true});
   });
 
-  // @gate !disableLegacyContext
   it('should pass context when re-rendered for static child within a composite component', () => {
     class Parent extends React.Component {
       static childContextTypes = {
@@ -747,13 +739,10 @@ describe('ReactCompositeComponent', () => {
     }
 
     class Wrapper extends React.Component {
-      parentRef = React.createRef();
-      childRef = React.createRef();
-
       render() {
         return (
-          <Parent ref={this.parentRef}>
-            <Child ref={this.childRef} />
+          <Parent ref="parent">
+            <Child ref="child" />
           </Parent>
         );
       }
@@ -761,17 +750,16 @@ describe('ReactCompositeComponent', () => {
 
     const wrapper = ReactTestUtils.renderIntoDocument(<Wrapper />);
 
-    expect(wrapper.parentRef.current.state.flag).toEqual(true);
-    expect(wrapper.childRef.current.context).toEqual({flag: true});
+    expect(wrapper.refs.parent.state.flag).toEqual(true);
+    expect(wrapper.refs.child.context).toEqual({flag: true});
 
     // We update <Parent /> while <Child /> is still a static prop relative to this update
-    wrapper.parentRef.current.setState({flag: false});
+    wrapper.refs.parent.setState({flag: false});
 
-    expect(wrapper.parentRef.current.state.flag).toEqual(false);
-    expect(wrapper.childRef.current.context).toEqual({flag: false});
+    expect(wrapper.refs.parent.state.flag).toEqual(false);
+    expect(wrapper.refs.child.context).toEqual({flag: false});
   });
 
-  // @gate !disableLegacyContext
   it('should pass context transitively', () => {
     let childInstance = null;
     let grandchildInstance = null;
@@ -833,7 +821,6 @@ describe('ReactCompositeComponent', () => {
     expect(grandchildInstance.context).toEqual({foo: 'bar', depth: 1});
   });
 
-  // @gate !disableLegacyContext
   it('should pass context when re-rendered', () => {
     let parentInstance = null;
     let childInstance = null;
@@ -880,7 +867,7 @@ describe('ReactCompositeComponent', () => {
     expect(childInstance).toBeNull();
 
     expect(parentInstance.state.flag).toBe(false);
-    ReactDOM.unstable_batchedUpdates(function () {
+    ReactDOM.unstable_batchedUpdates(function() {
       parentInstance.setState({flag: true});
     });
     expect(parentInstance.state.flag).toBe(true);
@@ -888,7 +875,6 @@ describe('ReactCompositeComponent', () => {
     expect(childInstance.context).toEqual({foo: 'bar', depth: 0});
   });
 
-  // @gate !disableLegacyContext
   it('unmasked context propagates through updates', () => {
     class Leaf extends React.Component {
       static contextTypes = {
@@ -952,7 +938,6 @@ describe('ReactCompositeComponent', () => {
     expect(div.children[0].id).toBe('aliens');
   });
 
-  // @gate !disableLegacyContext
   it('should trigger componentWillReceiveProps for context changes', () => {
     let contextChanges = 0;
     let propChanges = 0;
@@ -1157,17 +1142,14 @@ describe('ReactCompositeComponent', () => {
     }
 
     class Component extends React.Component {
-      static0Ref = React.createRef();
-      static1Ref = React.createRef();
-
       render() {
         if (this.props.flipped) {
           return (
             <div>
-              <Static ref={this.static0Ref} key="B">
+              <Static ref="static0" key="B">
                 B (ignored)
               </Static>
-              <Static ref={this.static1Ref} key="A">
+              <Static ref="static1" key="A">
                 A (ignored)
               </Static>
             </div>
@@ -1175,10 +1157,10 @@ describe('ReactCompositeComponent', () => {
         } else {
           return (
             <div>
-              <Static ref={this.static0Ref} key="A">
+              <Static ref="static0" key="A">
                 A
               </Static>
-              <Static ref={this.static1Ref} key="B">
+              <Static ref="static1" key="B">
                 B
               </Static>
             </div>
@@ -1189,14 +1171,14 @@ describe('ReactCompositeComponent', () => {
 
     const container = document.createElement('div');
     const comp = ReactDOM.render(<Component flipped={false} />, container);
-    expect(ReactDOM.findDOMNode(comp.static0Ref.current).textContent).toBe('A');
-    expect(ReactDOM.findDOMNode(comp.static1Ref.current).textContent).toBe('B');
+    expect(ReactDOM.findDOMNode(comp.refs.static0).textContent).toBe('A');
+    expect(ReactDOM.findDOMNode(comp.refs.static1).textContent).toBe('B');
 
     // When flipping the order, the refs should update even though the actual
     // contents do not
     ReactDOM.render(<Component flipped={true} />, container);
-    expect(ReactDOM.findDOMNode(comp.static0Ref.current).textContent).toBe('B');
-    expect(ReactDOM.findDOMNode(comp.static1Ref.current).textContent).toBe('A');
+    expect(ReactDOM.findDOMNode(comp.refs.static0).textContent).toBe('B');
+    expect(ReactDOM.findDOMNode(comp.refs.static1).textContent).toBe('A');
   });
 
   it('should allow access to findDOMNode in componentWillUnmount', () => {
@@ -1226,7 +1208,6 @@ describe('ReactCompositeComponent', () => {
     expect(a).toBe(b);
   });
 
-  // @gate !disableLegacyContext || !__DEV__
   it('context should be passed down from the parent', () => {
     class Parent extends React.Component {
       static childContextTypes = {
@@ -1280,10 +1261,10 @@ describe('ReactCompositeComponent', () => {
   });
 
   it('should support objects with prototypes as state', () => {
-    const NotActuallyImmutable = function (str) {
+    const NotActuallyImmutable = function(str) {
       this.str = str;
     };
-    NotActuallyImmutable.prototype.amIImmutable = function () {
+    NotActuallyImmutable.prototype.amIImmutable = function() {
       return true;
     };
     class Moo extends React.Component {
@@ -1313,7 +1294,7 @@ describe('ReactCompositeComponent', () => {
 
     // When more than one state update is enqueued, we have the same behavior
     const fifthState = new NotActuallyImmutable('fifth');
-    ReactDOM.unstable_batchedUpdates(function () {
+    ReactDOM.unstable_batchedUpdates(function() {
       moo.setState({str: 'fourth'});
       moo._replaceState(fifthState);
     });
@@ -1321,7 +1302,7 @@ describe('ReactCompositeComponent', () => {
 
     // When more than one state update is enqueued, we have the same behavior
     const sixthState = new NotActuallyImmutable('sixth');
-    ReactDOM.unstable_batchedUpdates(function () {
+    ReactDOM.unstable_batchedUpdates(function() {
       moo._replaceState(sixthState);
       moo.setState({str: 'seventh'});
     });
@@ -1472,11 +1453,10 @@ describe('ReactCompositeComponent', () => {
         this.state = {
           color: 'green',
         };
-        this.appleRef = React.createRef();
       }
 
       render() {
-        return <Apple color={this.state.color} ref={this.appleRef} />;
+        return <Apple color={this.state.color} ref="apple" />;
       }
     }
 
@@ -1522,15 +1502,15 @@ describe('ReactCompositeComponent', () => {
     expect(renderCalls).toBe(2);
 
     // Re-render base on state
-    instance.appleRef.current.cut();
+    instance.refs.apple.cut();
     expect(renderCalls).toBe(3);
 
     // No re-render based on state
-    instance.appleRef.current.cut();
+    instance.refs.apple.cut();
     expect(renderCalls).toBe(3);
 
     // Re-render based on state again
-    instance.appleRef.current.eatSlice();
+    instance.refs.apple.eatSlice();
     expect(renderCalls).toBe(4);
   });
 

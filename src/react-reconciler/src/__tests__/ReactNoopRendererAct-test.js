@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,8 +12,7 @@
 const React = require('react');
 const ReactNoop = require('react-noop-renderer');
 const Scheduler = require('scheduler');
-const act = require('internal-test-utils').act;
-const {assertLog, waitForAll} = require('internal-test-utils');
+const act = require('jest-react').act;
 
 // TODO: These tests are no longer specific to the noop renderer
 // implementation. They test the internal implementation we use in the React
@@ -26,7 +25,7 @@ describe('internal act()', () => {
     }
 
     const calledLog = [];
-    await act(() => {
+    act(() => {
       ReactNoop.render(
         <App
           callback={() => {
@@ -35,7 +34,7 @@ describe('internal act()', () => {
         />,
       );
     });
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(calledLog).toEqual([0]);
   });
 
@@ -43,9 +42,9 @@ describe('internal act()', () => {
     function App() {
       const [ctr, setCtr] = React.useState(0);
       async function someAsyncFunction() {
-        Scheduler.log('stage 1');
+        Scheduler.unstable_yieldValue('stage 1');
         await null;
-        Scheduler.log('stage 2');
+        Scheduler.unstable_yieldValue('stage 2');
         await null;
         setCtr(1);
       }
@@ -54,11 +53,11 @@ describe('internal act()', () => {
       }, []);
       return ctr;
     }
-    await act(() => {
+    await act(async () => {
       ReactNoop.render(<App />);
     });
-    assertLog(['stage 1', 'stage 2']);
-    await waitForAll([]);
-    expect(ReactNoop).toMatchRenderedOutput('1');
+    expect(Scheduler).toHaveYielded(['stage 1', 'stage 2']);
+    expect(Scheduler).toFlushWithoutYielding();
+    expect(ReactNoop.getChildren()).toEqual([{text: '1', hidden: false}]);
   });
 });

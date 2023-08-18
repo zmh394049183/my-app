@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -28,7 +28,7 @@ type PendingPayload = {
 
 type ResolvedPayload<T> = {
   _status: 1,
-  _result: {default: T, ...},
+  _result: {default: T},
 };
 
 type RejectedPayload = {
@@ -43,7 +43,7 @@ type Payload<T> =
   | RejectedPayload;
 
 export type LazyComponent<T, P> = {
-  $$typeof: symbol | number,
+  $$typeof: Symbol | number,
   _payload: P,
   _init: (payload: P) => T,
 };
@@ -137,14 +137,13 @@ export function lazy<T>(
     // In production, this would just set it on the object.
     let defaultProps;
     let propTypes;
-    // $FlowFixMe[prop-missing]
+    // $FlowFixMe
     Object.defineProperties(lazyType, {
       defaultProps: {
         configurable: true,
         get() {
           return defaultProps;
         },
-        // $FlowFixMe[missing-local-annot]
         set(newDefaultProps) {
           console.error(
             'React.lazy(...): It is not supported to assign `defaultProps` to ' +
@@ -153,7 +152,7 @@ export function lazy<T>(
           );
           defaultProps = newDefaultProps;
           // Match production behavior more closely:
-          // $FlowFixMe[prop-missing]
+          // $FlowFixMe
           Object.defineProperty(lazyType, 'defaultProps', {
             enumerable: true,
           });
@@ -164,7 +163,6 @@ export function lazy<T>(
         get() {
           return propTypes;
         },
-        // $FlowFixMe[missing-local-annot]
         set(newPropTypes) {
           console.error(
             'React.lazy(...): It is not supported to assign `propTypes` to ' +
@@ -173,7 +171,7 @@ export function lazy<T>(
           );
           propTypes = newPropTypes;
           // Match production behavior more closely:
-          // $FlowFixMe[prop-missing]
+          // $FlowFixMe
           Object.defineProperty(lazyType, 'propTypes', {
             enumerable: true,
           });

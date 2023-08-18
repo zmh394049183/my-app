@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -24,17 +24,13 @@ let images = [];
 let onLoadSpy = null;
 let actualLoadSpy = null;
 
-let waitForAll;
-let waitFor;
-let assertLog;
-
 function PhaseMarkers({children}) {
-  Scheduler.log('render start');
+  Scheduler.unstable_yieldValue('render start');
   React.useLayoutEffect(() => {
-    Scheduler.log('last layout');
+    Scheduler.unstable_yieldValue('last layout');
   });
   React.useEffect(() => {
-    Scheduler.log('last passive');
+    Scheduler.unstable_yieldValue('last passive');
   });
   return children;
 }
@@ -50,7 +46,7 @@ function last(arr) {
 }
 
 function Text(props) {
-  Scheduler.log(props.text);
+  Scheduler.unstable_yieldValue(props.text);
   return props.text;
 }
 
@@ -58,13 +54,13 @@ function Text(props) {
 //   const text = props.text;
 //   try {
 //     TextResource.read([props.text, props.ms]);
-//     Scheduler.log(text);
+//     Scheduler.unstable_yieldValue(text);
 //     return text;
 //   } catch (promise) {
 //     if (typeof promise.then === 'function') {
-//       Scheduler.log(`Suspend! [${text}]`);
+//       Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
 //     } else {
-//       Scheduler.log(`Error! [${text}]`);
+//       Scheduler.unstable_yieldValue(`Error! [${text}]`);
 //     }
 //     throw promise;
 //   }
@@ -72,12 +68,12 @@ function Text(props) {
 
 function Img({src: maybeSrc, onLoad, useImageLoader, ref}) {
   const src = maybeSrc || 'default';
-  Scheduler.log('Img ' + src);
+  Scheduler.unstable_yieldValue('Img ' + src);
   return <img src={src} onLoad={onLoad} />;
 }
 
 function Yield() {
-  Scheduler.log('Yield');
+  Scheduler.unstable_yieldValue('Yield');
   Scheduler.unstable_requestPaint();
   return null;
 }
@@ -98,19 +94,14 @@ describe('ReactDOMImageLoad', () => {
     ReactDOMClient = require('react-dom/client');
     // Suspense = React.Suspense;
 
-    const InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
-    waitFor = InternalTestUtils.waitFor;
-    assertLog = InternalTestUtils.assertLog;
-
     onLoadSpy = jest.fn(reactEvent => {
       const src = reactEvent.target.getAttribute('src');
-      Scheduler.log('onLoadSpy [' + src + ']');
+      Scheduler.unstable_yieldValue('onLoadSpy [' + src + ']');
     });
 
     actualLoadSpy = jest.fn(nativeEvent => {
       const src = nativeEvent.target.getAttribute('src');
-      Scheduler.log('actualLoadSpy [' + src + ']');
+      Scheduler.unstable_yieldValue('actualLoadSpy [' + src + ']');
       nativeEvent.__originalDispatch = false;
     });
 
@@ -127,14 +118,14 @@ describe('ReactDOMImageLoad', () => {
     //               listeners = [{resolve, reject}];
     //               setTimeout(() => {
     //                 if (textResourceShouldFail) {
-    //                   Scheduler.log(
+    //                   Scheduler.unstable_yieldValue(
     //                     `Promise rejected [${text}]`,
     //                   );
     //                   status = 'rejected';
     //                   value = new Error('Failed to load: ' + text);
     //                   listeners.forEach(listener => listener.reject(value));
     //                 } else {
-    //                   Scheduler.log(
+    //                   Scheduler.unstable_yieldValue(
     //                     `Promise resolved [${text}]`,
     //                   );
     //                   status = 'resolved';
@@ -185,7 +176,7 @@ describe('ReactDOMImageLoad', () => {
         return this.getAttribute('src');
       },
       set(value) {
-        Scheduler.log('load triggered');
+        Scheduler.unstable_yieldValue('load triggered');
         this.__needsDispatch = true;
         this.setAttribute('src', value);
       },
@@ -201,7 +192,7 @@ describe('ReactDOMImageLoad', () => {
     );
   });
 
-  it('captures the load event if it happens before commit phase and replays it between layout and passive effects', async function () {
+  it('captures the load event if it happens before commit phase and replays it between layout and passive effects', async function() {
     const container = document.createElement('div');
     const root = ReactDOMClient.createRoot(container);
 
@@ -215,24 +206,33 @@ describe('ReactDOMImageLoad', () => {
       ),
     );
 
-    await waitFor(['render start', 'Img default', 'Yield']);
+    expect(Scheduler).toFlushAndYieldThrough([
+      'render start',
+      'Img default',
+      'Yield',
+    ]);
     const img = last(images);
     loadImage(img);
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       'actualLoadSpy [default]',
       // no onLoadSpy since we have not completed render
     ]);
-    await waitForAll(['a', 'load triggered', 'last layout', 'last passive']);
+    expect(Scheduler).toFlushAndYield([
+      'a',
+      'load triggered',
+      'last layout',
+      'last passive',
+    ]);
     expect(img.__needsDispatch).toBe(true);
     loadImage(img);
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       'actualLoadSpy [default]', // the browser reloading of the image causes this to yield again
       'onLoadSpy [default]',
     ]);
     expect(onLoadSpy).toHaveBeenCalled();
   });
 
-  it('captures the load event if it happens after commit phase and replays it', async function () {
+  it('captures the load event if it happens after commit phase and replays it', async function() {
     const container = document.createElement('div');
     const root = ReactDOMClient.createRoot(container);
 
@@ -244,7 +244,7 @@ describe('ReactDOMImageLoad', () => {
       ),
     );
 
-    await waitFor([
+    expect(Scheduler).toFlushAndYieldThrough([
       'render start',
       'Img default',
       'load triggered',
@@ -253,13 +253,16 @@ describe('ReactDOMImageLoad', () => {
     Scheduler.unstable_requestPaint();
     const img = last(images);
     loadImage(img);
-    assertLog(['actualLoadSpy [default]', 'onLoadSpy [default]']);
-    await waitForAll(['last passive']);
+    expect(Scheduler).toHaveYielded([
+      'actualLoadSpy [default]',
+      'onLoadSpy [default]',
+    ]);
+    expect(Scheduler).toFlushAndYield(['last passive']);
     expect(img.__needsDispatch).toBe(false);
     expect(onLoadSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('it replays the last load event when more than one fire before the end of the layout phase completes', async function () {
+  it('it replays the last load event when more than one fire before the end of the layout phase completes', async function() {
     const container = document.createElement('div');
     const root = ReactDOMClient.createRoot(container);
 
@@ -283,12 +286,16 @@ describe('ReactDOMImageLoad', () => {
 
     React.startTransition(() => root.render(<Base />));
 
-    await waitFor(['render start', 'Img a', 'Yield']);
+    expect(Scheduler).toFlushAndYieldThrough([
+      'render start',
+      'Img a',
+      'Yield',
+    ]);
     const img = last(images);
     loadImage(img);
-    assertLog(['actualLoadSpy [a]']);
+    expect(Scheduler).toHaveYielded(['actualLoadSpy [a]']);
 
-    await waitFor([
+    expect(Scheduler).toFlushAndYieldThrough([
       'load triggered',
       'last layout',
       // the update in layout causes a passive effects flush before a sync render
@@ -302,11 +309,11 @@ describe('ReactDOMImageLoad', () => {
     ]);
     expect(images.length).toBe(1);
     loadImage(img);
-    assertLog(['actualLoadSpy [b]', 'onLoadSpy [b]']);
+    expect(Scheduler).toHaveYielded(['actualLoadSpy [b]', 'onLoadSpy [b]']);
     expect(onLoadSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('replays load events that happen in passive phase after the passive phase.', async function () {
+  it('replays load events that happen in passive phase after the passive phase.', async function() {
     const container = document.createElement('div');
     const root = ReactDOMClient.createRoot(container);
 
@@ -316,7 +323,7 @@ describe('ReactDOMImageLoad', () => {
       </PhaseMarkers>,
     );
 
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       'render start',
       'Img default',
       'load triggered',
@@ -325,11 +332,14 @@ describe('ReactDOMImageLoad', () => {
     ]);
     const img = last(images);
     loadImage(img);
-    assertLog(['actualLoadSpy [default]', 'onLoadSpy [default]']);
+    expect(Scheduler).toHaveYielded([
+      'actualLoadSpy [default]',
+      'onLoadSpy [default]',
+    ]);
     expect(onLoadSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('captures and suppresses the load event if it happens before passive effects and a cascading update causes the img to be removed', async function () {
+  it('captures and suppresses the load event if it happens before passive effects and a cascading update causes the img to be removed', async function() {
     const container = document.createElement('div');
     const root = ReactDOMClient.createRoot(container);
 
@@ -355,21 +365,30 @@ describe('ReactDOMImageLoad', () => {
       ),
     );
 
-    await waitFor(['render start', 'Img default', 'Yield']);
+    expect(Scheduler).toFlushAndYieldThrough([
+      'render start',
+      'Img default',
+      'Yield',
+    ]);
     const img = last(images);
     loadImage(img);
-    assertLog(['actualLoadSpy [default]']);
-    await waitForAll(['a', 'load triggered', 'last layout', 'last passive']);
+    expect(Scheduler).toHaveYielded(['actualLoadSpy [default]']);
+    expect(Scheduler).toFlushAndYield([
+      'a',
+      'load triggered',
+      'last layout',
+      'last passive',
+    ]);
     expect(img.__needsDispatch).toBe(true);
     loadImage(img);
     // we expect the browser to load the image again but since we are no longer rendering
     // the img there will be no onLoad called
-    assertLog(['actualLoadSpy [default]']);
-    await waitForAll([]);
+    expect(Scheduler).toHaveYielded(['actualLoadSpy [default]']);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(onLoadSpy).not.toHaveBeenCalled();
   });
 
-  it('captures and suppresses the load event if it happens before passive effects and a cascading update causes the img to be removed, alternate', async function () {
+  it('captures and suppresses the load event if it happens before passive effects and a cascading update causes the img to be removed, alternate', async function() {
     const container = document.createElement('div');
     const root = ReactDOMClient.createRoot(container);
 
@@ -407,7 +426,7 @@ describe('ReactDOMImageLoad', () => {
       ),
     );
 
-    await waitFor([
+    expect(Scheduler).toFlushAndYieldThrough([
       // initial render
       'render start',
       'Img default',
@@ -415,8 +434,8 @@ describe('ReactDOMImageLoad', () => {
     ]);
     const img = last(images);
     loadImage(img);
-    assertLog(['actualLoadSpy [default]']);
-    await waitForAll([
+    expect(Scheduler).toHaveYielded(['actualLoadSpy [default]']);
+    expect(Scheduler).toFlushAndYield([
       'a',
       'load triggered',
       // img is present at first
@@ -431,14 +450,14 @@ describe('ReactDOMImageLoad', () => {
     loadImage(img);
     // we expect the browser to load the image again but since we are no longer rendering
     // the img there will be no onLoad called
-    assertLog(['actualLoadSpy [default]']);
-    await waitForAll([]);
+    expect(Scheduler).toHaveYielded(['actualLoadSpy [default]']);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(onLoadSpy).not.toHaveBeenCalled();
   });
 
   // it('captures the load event if it happens in a suspended subtree and replays it between layout and passive effects on resumption', async function() {
   //   function SuspendingWithImage() {
-  //     Scheduler.log('SuspendingWithImage');
+  //     Scheduler.unstable_yieldValue('SuspendingWithImage');
   //     return (
   //       <Suspense fallback={<Text text="Loading..." />}>
   //         <AsyncText text="A" ms={100} />
@@ -498,7 +517,7 @@ describe('ReactDOMImageLoad', () => {
   //   expect(onLoadSpy).toHaveBeenCalledTimes(1);
   // });
 
-  it('correctly replays the last img load even when a yield + update causes the host element to change', async function () {
+  it('correctly replays the last img load even when a yield + update causes the host element to change', async function() {
     let externalSetSrc = null;
     let externalSetSrcAlt = null;
 
@@ -511,9 +530,9 @@ describe('ReactDOMImageLoad', () => {
     }
 
     function YieldingWithImage({src}) {
-      Scheduler.log('YieldingWithImage');
+      Scheduler.unstable_yieldValue('YieldingWithImage');
       React.useEffect(() => {
-        Scheduler.log('Committed');
+        Scheduler.unstable_yieldValue('Committed');
       });
       return (
         <>
@@ -529,18 +548,22 @@ describe('ReactDOMImageLoad', () => {
 
     root.render(<Base />);
 
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
     React.startTransition(() => externalSetSrc('a'));
 
-    await waitFor(['YieldingWithImage', 'Img a', 'Yield']);
+    expect(Scheduler).toFlushAndYieldThrough([
+      'YieldingWithImage',
+      'Img a',
+      'Yield',
+    ]);
     let img = last(images);
     loadImage(img);
-    assertLog(['actualLoadSpy [a]']);
+    expect(Scheduler).toHaveYielded(['actualLoadSpy [a]']);
 
     ReactDOM.flushSync(() => externalSetSrcAlt('b'));
 
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       'YieldingWithImage',
       'Img b',
       'Yield',
@@ -553,12 +576,18 @@ describe('ReactDOMImageLoad', () => {
     expect(img.__needsDispatch).toBe(true);
     loadImage(img);
 
-    assertLog(['actualLoadSpy [b]', 'onLoadSpy [b]']);
+    expect(Scheduler).toHaveYielded(['actualLoadSpy [b]', 'onLoadSpy [b]']);
     // why is there another update here?
-    await waitForAll(['YieldingWithImage', 'Img b', 'Yield', 'b', 'Committed']);
+    expect(Scheduler).toFlushAndYield([
+      'YieldingWithImage',
+      'Img b',
+      'Yield',
+      'b',
+      'Committed',
+    ]);
   });
 
-  it('preserves the src property / attribute when triggering a potential new load event', async () => {
+  it('preserves the src property / attribute when triggering a potential new load event', () => {
     // this test covers a regression identified in https://github.com/mui/material-ui/pull/31263
     // where the resetting of the src property caused the property to change from relative to fully qualified
 
@@ -583,13 +612,17 @@ describe('ReactDOMImageLoad', () => {
     );
 
     // render to yield to capture state of img src attribute and property before commit
-    await waitFor(['render start', 'Img default', 'Yield']);
+    expect(Scheduler).toFlushAndYieldThrough([
+      'render start',
+      'Img default',
+      'Yield',
+    ]);
     const img = last(images);
     const renderSrcProperty = img.src;
     const renderSrcAttr = img.getAttribute('src');
 
     // finish render and commit causing the src property to be rewritten
-    await waitForAll(['a', 'last layout', 'last passive']);
+    expect(Scheduler).toFlushAndYield(['a', 'last layout', 'last passive']);
     const commitSrcProperty = img.src;
     const commitSrcAttr = img.getAttribute('src');
 

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -10,7 +10,10 @@
 import type {Source} from 'shared/ReactElementType';
 import type {LazyComponent} from 'react/src/ReactLazy';
 
-import {enableComponentStackLocations} from 'shared/ReactFeatureFlags';
+import {
+  enableComponentStackLocations,
+  disableNativeComponentFrames,
+} from 'shared/ReactFeatureFlags';
 
 import {
   REACT_SUSPENSE_TYPE,
@@ -57,7 +60,7 @@ let reentry = false;
 let componentFrameCache;
 if (__DEV__) {
   const PossiblyWeakMap = typeof WeakMap === 'function' ? WeakMap : Map;
-  componentFrameCache = new PossiblyWeakMap<Function, string>();
+  componentFrameCache = new PossiblyWeakMap();
 }
 
 export function describeNativeComponentFrame(
@@ -65,7 +68,7 @@ export function describeNativeComponentFrame(
   construct: boolean,
 ): string {
   // If something asked for a stack inside a fake render, it should get ignored.
-  if (!fn || reentry) {
+  if (disableNativeComponentFrames || !fn || reentry) {
     return '';
   }
 
@@ -80,7 +83,7 @@ export function describeNativeComponentFrame(
 
   reentry = true;
   const previousPrepareStackTrace = Error.prepareStackTrace;
-  // $FlowFixMe[incompatible-type] It does accept undefined.
+  // $FlowFixMe It does accept undefined.
   Error.prepareStackTrace = undefined;
   let previousDispatcher;
   if (__DEV__) {
@@ -94,12 +97,12 @@ export function describeNativeComponentFrame(
     // This should throw.
     if (construct) {
       // Something should be setting the props in the constructor.
-      const Fake = function () {
+      const Fake = function() {
         throw Error();
       };
-      // $FlowFixMe[prop-missing]
+      // $FlowFixMe
       Object.defineProperty(Fake.prototype, 'props', {
-        set: function () {
+        set: function() {
           // We use a throwing setter instead of frozen or non-writable props
           // because that won't throw in a non-strict mode function.
           throw Error();
@@ -120,7 +123,6 @@ export function describeNativeComponentFrame(
         } catch (x) {
           control = x;
         }
-        // $FlowFixMe[prop-missing] found when upgrading Flow
         fn.call(Fake.prototype);
       }
     } else {
@@ -129,18 +131,7 @@ export function describeNativeComponentFrame(
       } catch (x) {
         control = x;
       }
-      // TODO(luna): This will currently only throw if the function component
-      // tries to access React/ReactDOM/props. We should probably make this throw
-      // in simple components too
-      const maybePromise = fn();
-
-      // If the function component returns a promise, it's likely an async
-      // component, which we don't yet support. Attach a noop catch handler to
-      // silence the error.
-      // TODO: Implement component stacks for async client components?
-      if (maybePromise && typeof maybePromise.catch === 'function') {
-        maybePromise.catch(() => {});
-      }
+      fn();
     }
   } catch (sample) {
     // This is inlined manually because closure doesn't do it for us.

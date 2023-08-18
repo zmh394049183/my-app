@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -20,7 +20,7 @@ function FunctionComponent(props) {
 
 describe('ReactFunctionComponent', () => {
   beforeEach(() => {
-    jest.resetModules();
+    jest.resetModuleRegistry();
     PropTypes = require('prop-types');
     React = require('react');
     ReactDOM = require('react-dom');
@@ -59,7 +59,6 @@ describe('ReactFunctionComponent', () => {
     expect(container.textContent).toBe('');
   });
 
-  // @gate !disableLegacyContext
   it('should pass context thru stateless component', () => {
     class Child extends React.Component {
       static contextTypes = {
@@ -103,7 +102,7 @@ describe('ReactFunctionComponent', () => {
     function FunctionComponentWithChildContext() {
       return null;
     }
-    FunctionComponentWithChildContext.getDerivedStateFromProps = function () {};
+    FunctionComponentWithChildContext.getDerivedStateFromProps = function() {};
 
     const container = document.createElement('div');
 
@@ -139,7 +138,7 @@ describe('ReactFunctionComponent', () => {
 
   it('should not throw when stateless component returns undefined', () => {
     function NotAComponent() {}
-    expect(function () {
+    expect(function() {
       ReactTestUtils.renderIntoDocument(
         <div>
           <NotAComponent />
@@ -153,7 +152,7 @@ describe('ReactFunctionComponent', () => {
       return <div ref="me" />;
     }
 
-    expect(function () {
+    expect(function() {
       ReactTestUtils.renderIntoDocument(<Child test="test" />);
     }).toThrowError(
       __DEV__
@@ -306,7 +305,6 @@ describe('ReactFunctionComponent', () => {
 
   // This guards against a regression caused by clearing the current debug fiber.
   // https://github.com/facebook/react/issues/10831
-  // @gate !disableLegacyContext || !__DEV__
   it('should warn when giving a function ref with context', () => {
     function Child() {
       return null;
@@ -325,7 +323,7 @@ describe('ReactFunctionComponent', () => {
         };
       }
       render() {
-        return <Child ref={function () {}} />;
+        return <Child ref={function() {}} />;
       }
     }
 
@@ -369,15 +367,13 @@ describe('ReactFunctionComponent', () => {
     Child.defaultProps = {test: 2};
     Child.propTypes = {test: PropTypes.string};
 
-    expect(() => ReactTestUtils.renderIntoDocument(<Child />)).toErrorDev([
-      'Warning: Child: Support for defaultProps will be removed from function components in a future major release. Use JavaScript default parameters instead.',
+    expect(() => ReactTestUtils.renderIntoDocument(<Child />)).toErrorDev(
       'Warning: Failed prop type: Invalid prop `test` of type `number` ' +
         'supplied to `Child`, expected `string`.\n' +
         '    in Child (at **)',
-    ]);
+    );
   });
 
-  // @gate !disableLegacyContext
   it('should receive context', () => {
     class Parent extends React.Component {
       static childContextTypes = {
@@ -404,7 +400,7 @@ describe('ReactFunctionComponent', () => {
   });
 
   it('should work with arrow functions', () => {
-    let Child = function () {
+    let Child = function() {
       return <div />;
     };
     // Will create a new bound function without a prototype, much like a native
@@ -415,7 +411,7 @@ describe('ReactFunctionComponent', () => {
   });
 
   it('should allow simple functions to return null', () => {
-    const Child = function () {
+    const Child = function() {
       return null;
     };
     expect(() => ReactTestUtils.renderIntoDocument(<Child />)).not.toThrow();

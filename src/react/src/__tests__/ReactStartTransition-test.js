@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -22,12 +22,12 @@ describe('ReactStartTransition', () => {
     jest.resetModules();
     React = require('react');
     ReactTestRenderer = require('react-test-renderer');
-    act = require('internal-test-utils').act;
+    act = require('jest-react').act;
     useState = React.useState;
     useTransition = React.useTransition;
   });
 
-  it('Warns if a suspicious number of fibers are updated inside startTransition', async () => {
+  it('Warns if a suspicious number of fibers are updated inside startTransition', () => {
     const subs = new Set();
     const useUserSpaceSubscription = () => {
       const setState = useState(0)[1];
@@ -47,14 +47,14 @@ describe('ReactStartTransition', () => {
       return null;
     };
 
-    await act(() => {
+    act(() => {
       ReactTestRenderer.create(<Component level={0} />, {
         unstable_isConcurrent: true,
       });
     });
 
-    await expect(async () => {
-      await act(() => {
+    expect(() => {
+      act(() => {
         React.startTransition(() => {
           subs.forEach(setState => {
             setState(state => state + 1);
@@ -70,8 +70,8 @@ describe('ReactStartTransition', () => {
       {withoutStack: true},
     );
 
-    await expect(async () => {
-      await act(() => {
+    expect(() => {
+      act(() => {
         triggerHookTransition(() => {
           subs.forEach(setState => {
             setState(state => state + 1);

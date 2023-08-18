@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -18,7 +18,6 @@ let performance;
 let cancelCallback;
 let scheduleCallback;
 let requestPaint;
-let shouldYield;
 let NormalPriority;
 
 // The Scheduler implementation uses browser APIs like `MessageChannel` and
@@ -43,7 +42,6 @@ describe('SchedulerBrowser', () => {
     scheduleCallback = Scheduler.unstable_scheduleCallback;
     NormalPriority = Scheduler.unstable_NormalPriority;
     requestPaint = Scheduler.unstable_requestPaint;
-    shouldYield = Scheduler.unstable_shouldYield;
   });
 
   afterEach(() => {
@@ -344,7 +342,7 @@ describe('SchedulerBrowser', () => {
       // about, like a network event.
       gate(flags =>
         flags.enableIsInputPending
-          ? 'Yield at 10ms'
+          ? 'Yield at 300ms'
           : // When isInputPending is disabled, we always yield quickly
             'Yield at 5ms',
       ),
@@ -398,7 +396,7 @@ describe('SchedulerBrowser', () => {
         // about, like a network event.
         gate(flags =>
           flags.enableIsInputPending
-            ? 'Yield at 10ms'
+            ? 'Yield at 300ms'
             : // When isInputPending is disabled, we always yield quickly
               'Yield at 5ms',
         ),
@@ -423,7 +421,7 @@ describe('SchedulerBrowser', () => {
         // as quickly as for a discrete event.
         gate(flags =>
           flags.enableIsInputPending
-            ? 'Yield at 10ms'
+            ? 'Yield at 50ms'
             : // When isInputPending is disabled, we always yield quickly
               'Yield at 5ms',
         ),
@@ -453,7 +451,7 @@ describe('SchedulerBrowser', () => {
       'Task with no paint',
       gate(flags =>
         flags.enableIsInputPending
-          ? 'Yield at 10ms'
+          ? 'Yield at 300ms'
           : // When isInputPending is disabled, we always yield quickly
             'Yield at 5ms',
       ),
@@ -476,37 +474,5 @@ describe('SchedulerBrowser', () => {
       // This time we yielded quickly (5ms) because we requested a paint.
       'Yield at 5ms',
     ]);
-  });
-
-  it('yielding continues in a new task regardless of how much time is remaining', () => {
-    scheduleCallback(NormalPriority, () => {
-      runtime.log('Original Task');
-      runtime.log('shouldYield: ' + shouldYield());
-      runtime.log('Return a continuation');
-      return () => {
-        runtime.log('Continuation Task');
-      };
-    });
-    runtime.assertLog(['Post Message']);
-
-    runtime.fireMessageEvent();
-    runtime.assertLog([
-      'Message Event',
-      'Original Task',
-      // Immediately before returning a continuation, `shouldYield` returns
-      // false, which means there must be time remaining in the frame.
-      'shouldYield: false',
-      'Return a continuation',
-
-      // The continuation should be scheduled in a separate macrotask even
-      // though there's time remaining.
-      'Post Message',
-    ]);
-
-    // No time has elapsed
-    expect(performance.now()).toBe(0);
-
-    runtime.fireMessageEvent();
-    runtime.assertLog(['Message Event', 'Continuation Task']);
   });
 });

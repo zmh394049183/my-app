@@ -8,7 +8,6 @@ let getCacheForType;
 
 let caches;
 let seededCache;
-let assertLog;
 
 describe('ReactSuspenseWithNoopRenderer', () => {
   beforeEach(() => {
@@ -17,14 +16,11 @@ describe('ReactSuspenseWithNoopRenderer', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('internal-test-utils').act;
+    act = require('jest-react').act;
     Suspense = React.Suspense;
     useEffect = React.useEffect;
 
     getCacheForType = React.unstable_getCacheForType;
-
-    const InternalTestUtils = require('internal-test-utils');
-    assertLog = InternalTestUtils.assertLog;
 
     caches = [];
     seededCache = null;
@@ -86,16 +82,16 @@ describe('ReactSuspenseWithNoopRenderer', () => {
     if (record !== undefined) {
       switch (record.status) {
         case 'pending':
-          Scheduler.log(`Suspend! [${text}]`);
+          Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
           throw record.value;
         case 'rejected':
-          Scheduler.log(`Error! [${text}]`);
+          Scheduler.unstable_yieldValue(`Error! [${text}]`);
           throw record.value;
         case 'resolved':
           return textCache.version;
       }
     } else {
-      Scheduler.log(`Suspend! [${text}]`);
+      Scheduler.unstable_yieldValue(`Suspend! [${text}]`);
 
       const thenable = {
         pings: [],
@@ -142,10 +138,10 @@ describe('ReactSuspenseWithNoopRenderer', () => {
       readText(text);
 
       useEffect(() => {
-        Scheduler.log('Effect');
+        Scheduler.unstable_yieldValue('Effect');
       }, []);
 
-      Scheduler.log(text);
+      Scheduler.unstable_yieldValue(text);
       return text;
     });
 
@@ -161,19 +157,19 @@ describe('ReactSuspenseWithNoopRenderer', () => {
 
     // On initial mount, the suspended component is committed in an incomplete
     // state, without a passive static effect flag.
-    await act(() => {
+    await act(async () => {
       root.render(<App />);
     });
-    assertLog(['Suspend! [Async]']);
+    expect(Scheduler).toHaveYielded(['Suspend! [Async]']);
     expect(root).toMatchRenderedOutput('Loading...');
 
     // When the promise resolves, a passive static effect flag is added. In the
     // regression, the "missing expected static flag" would fire, because the
     // previous fiber did not have one.
-    await act(() => {
+    await act(async () => {
       resolveText('Async');
     });
-    assertLog(['Async', 'Effect']);
+    expect(Scheduler).toHaveYielded(['Async', 'Effect']);
     expect(root).toMatchRenderedOutput('Async');
   });
 });

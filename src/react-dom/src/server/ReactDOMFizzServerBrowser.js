@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -8,7 +8,6 @@
  */
 
 import type {ReactNodeList} from 'shared/ReactTypes';
-import type {BootstrapScriptDescriptor} from 'react-dom-bindings/src/server/ReactFizzConfigDOM';
 
 import ReactVersion from 'shared/ReactVersion';
 
@@ -20,24 +19,21 @@ import {
 } from 'react-server/src/ReactFizzServer';
 
 import {
-  createResources,
   createResponseState,
   createRootFormatContext,
-} from 'react-dom-bindings/src/server/ReactFizzConfigDOM';
+} from './ReactDOMServerFormatConfig';
 
-type Options = {
+type Options = {|
   identifierPrefix?: string,
   namespaceURI?: string,
   nonce?: string,
   bootstrapScriptContent?: string,
-  bootstrapScripts?: Array<string | BootstrapScriptDescriptor>,
-  bootstrapModules?: Array<string | BootstrapScriptDescriptor>,
+  bootstrapScripts?: Array<string>,
+  bootstrapModules?: Array<string>,
   progressiveChunkSize?: number,
   signal?: AbortSignal,
   onError?: (error: mixed) => ?string,
-  onPostpone?: (reason: string) => void,
-  unstable_externalRuntimeSrc?: string | BootstrapScriptDescriptor,
-};
+|};
 
 // TODO: Move to sub-classing ReadableStream.
 type ReactDOMServerReadableStream = ReadableStream & {
@@ -51,7 +47,7 @@ function renderToReadableStream(
   return new Promise((resolve, reject) => {
     let onFatalError;
     let onAllReady;
-    const allReady = new Promise<void>((res, rej) => {
+    const allReady = new Promise((res, rej) => {
       onAllReady = res;
       onFatalError = rej;
     });
@@ -60,14 +56,14 @@ function renderToReadableStream(
       const stream: ReactDOMServerReadableStream = (new ReadableStream(
         {
           type: 'bytes',
-          pull: (controller): ?Promise<void> => {
+          pull(controller) {
             startFlowing(request, controller);
           },
-          cancel: (reason): ?Promise<void> => {
+          cancel(reason) {
             abort(request);
           },
         },
-        // $FlowFixMe[prop-missing] size() methods are not allowed on byte streams.
+        // $FlowFixMe size() methods are not allowed on byte streams.
         {highWaterMark: 0},
       ): any);
       // TODO: Move to sub-classing ReadableStream.
@@ -81,18 +77,14 @@ function renderToReadableStream(
       allReady.catch(() => {});
       reject(error);
     }
-    const resources = createResources();
     const request = createRequest(
       children,
-      resources,
       createResponseState(
-        resources,
         options ? options.identifierPrefix : undefined,
         options ? options.nonce : undefined,
         options ? options.bootstrapScriptContent : undefined,
         options ? options.bootstrapScripts : undefined,
         options ? options.bootstrapModules : undefined,
-        options ? options.unstable_externalRuntimeSrc : undefined,
       ),
       createRootFormatContext(options ? options.namespaceURI : undefined),
       options ? options.progressiveChunkSize : undefined,
@@ -101,19 +93,14 @@ function renderToReadableStream(
       onShellReady,
       onShellError,
       onFatalError,
-      options ? options.onPostpone : undefined,
     );
     if (options && options.signal) {
       const signal = options.signal;
-      if (signal.aborted) {
+      const listener = () => {
         abort(request, (signal: any).reason);
-      } else {
-        const listener = () => {
-          abort(request, (signal: any).reason);
-          signal.removeEventListener('abort', listener);
-        };
-        signal.addEventListener('abort', listener);
-      }
+        signal.removeEventListener('abort', listener);
+      };
+      signal.addEventListener('abort', listener);
     }
     startWork(request);
   });

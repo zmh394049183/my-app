@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -13,8 +13,6 @@
 let React;
 let ReactNoop;
 let Scheduler;
-let waitFor;
-let waitForAll;
 
 describe('ReactIncrementalReflection', () => {
   beforeEach(() => {
@@ -23,10 +21,6 @@ describe('ReactIncrementalReflection', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-
-    const InternalTestUtils = require('internal-test-utils');
-    waitFor = InternalTestUtils.waitFor;
-    waitForAll = InternalTestUtils.waitForAll;
   });
 
   function div(...children) {
@@ -40,7 +34,7 @@ describe('ReactIncrementalReflection', () => {
     return {type: 'span', children: [], prop, hidden: false};
   }
 
-  it('handles isMounted even when the initial render is deferred', async () => {
+  it('handles isMounted even when the initial render is deferred', () => {
     const instances = [];
 
     class Component extends React.Component {
@@ -51,10 +45,14 @@ describe('ReactIncrementalReflection', () => {
       }
       UNSAFE_componentWillMount() {
         instances.push(this);
-        Scheduler.log('componentWillMount: ' + this._isMounted());
+        Scheduler.unstable_yieldValue(
+          'componentWillMount: ' + this._isMounted(),
+        );
       }
       componentDidMount() {
-        Scheduler.log('componentDidMount: ' + this._isMounted());
+        Scheduler.unstable_yieldValue(
+          'componentDidMount: ' + this._isMounted(),
+        );
       }
       render() {
         return <span />;
@@ -65,22 +63,26 @@ describe('ReactIncrementalReflection', () => {
       return <Component />;
     }
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Foo />);
+      });
+    } else {
       ReactNoop.render(<Foo />);
-    });
+    }
 
     // Render part way through but don't yet commit the updates.
-    await waitFor(['componentWillMount: false']);
+    expect(Scheduler).toFlushAndYieldThrough(['componentWillMount: false']);
 
     expect(instances[0]._isMounted()).toBe(false);
 
     // Render the rest and commit the updates.
-    await waitForAll(['componentDidMount: true']);
+    expect(Scheduler).toFlushAndYield(['componentDidMount: true']);
 
     expect(instances[0]._isMounted()).toBe(true);
   });
 
-  it('handles isMounted when an unmount is deferred', async () => {
+  it('handles isMounted when an unmount is deferred', () => {
     const instances = [];
 
     class Component extends React.Component {
@@ -91,16 +93,18 @@ describe('ReactIncrementalReflection', () => {
         instances.push(this);
       }
       componentWillUnmount() {
-        Scheduler.log('componentWillUnmount: ' + this._isMounted());
+        Scheduler.unstable_yieldValue(
+          'componentWillUnmount: ' + this._isMounted(),
+        );
       }
       render() {
-        Scheduler.log('Component');
+        Scheduler.unstable_yieldValue('Component');
         return <span />;
       }
     }
 
     function Other() {
-      Scheduler.log('Other');
+      Scheduler.unstable_yieldValue('Other');
       return <span />;
     }
 
@@ -109,26 +113,30 @@ describe('ReactIncrementalReflection', () => {
     }
 
     ReactNoop.render(<Foo mount={true} />);
-    await waitForAll(['Component']);
+    expect(Scheduler).toFlushAndYield(['Component']);
 
     expect(instances[0]._isMounted()).toBe(true);
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Foo mount={false} />);
+      });
+    } else {
       ReactNoop.render(<Foo mount={false} />);
-    });
+    }
     // Render part way through but don't yet commit the updates so it is not
     // fully unmounted yet.
-    await waitFor(['Other']);
+    expect(Scheduler).toFlushAndYieldThrough(['Other']);
 
     expect(instances[0]._isMounted()).toBe(true);
 
     // Finish flushing the unmount.
-    await waitForAll(['componentWillUnmount: true']);
+    expect(Scheduler).toFlushAndYield(['componentWillUnmount: true']);
 
     expect(instances[0]._isMounted()).toBe(false);
   });
 
-  it('finds no node before insertion and correct node before deletion', async () => {
+  it('finds no node before insertion and correct node before deletion', () => {
     let classInstance = null;
 
     function findInstance(inst) {
@@ -147,22 +155,37 @@ describe('ReactIncrementalReflection', () => {
     class Component extends React.Component {
       UNSAFE_componentWillMount() {
         classInstance = this;
-        Scheduler.log(['componentWillMount', findInstance(this)]);
+        Scheduler.unstable_yieldValue([
+          'componentWillMount',
+          findInstance(this),
+        ]);
       }
       componentDidMount() {
-        Scheduler.log(['componentDidMount', findInstance(this)]);
+        Scheduler.unstable_yieldValue([
+          'componentDidMount',
+          findInstance(this),
+        ]);
       }
       UNSAFE_componentWillUpdate() {
-        Scheduler.log(['componentWillUpdate', findInstance(this)]);
+        Scheduler.unstable_yieldValue([
+          'componentWillUpdate',
+          findInstance(this),
+        ]);
       }
       componentDidUpdate() {
-        Scheduler.log(['componentDidUpdate', findInstance(this)]);
+        Scheduler.unstable_yieldValue([
+          'componentDidUpdate',
+          findInstance(this),
+        ]);
       }
       componentWillUnmount() {
-        Scheduler.log(['componentWillUnmount', findInstance(this)]);
+        Scheduler.unstable_yieldValue([
+          'componentWillUnmount',
+          findInstance(this),
+        ]);
       }
       render() {
-        Scheduler.log('render');
+        Scheduler.unstable_yieldValue('render');
         return this.props.step < 2 ? (
           <span ref={ref => (this.span = ref)} />
         ) : this.props.step === 2 ? (
@@ -175,7 +198,7 @@ describe('ReactIncrementalReflection', () => {
 
     function Sibling() {
       // Sibling is used to assert that we've rendered past the first component.
-      Scheduler.log('render sibling');
+      Scheduler.unstable_yieldValue('render sibling');
       return <span />;
     }
 
@@ -183,18 +206,26 @@ describe('ReactIncrementalReflection', () => {
       return [<Component key="a" step={props.step} />, <Sibling key="b" />];
     }
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Foo step={0} />);
+      });
+    } else {
       ReactNoop.render(<Foo step={0} />);
-    });
+    }
     // Flush past Component but don't complete rendering everything yet.
-    await waitFor([['componentWillMount', null], 'render', 'render sibling']);
+    expect(Scheduler).toFlushAndYieldThrough([
+      ['componentWillMount', null],
+      'render',
+      'render sibling',
+    ]);
 
     expect(classInstance).toBeDefined();
     // The instance has been complete but is still not committed so it should
     // not find any host nodes in it.
     expect(findInstance(classInstance)).toBe(null);
 
-    await waitForAll([['componentDidMount', span()]]);
+    expect(Scheduler).toFlushAndYield([['componentDidMount', span()]]);
 
     const hostSpan = classInstance.span;
     expect(hostSpan).toBeDefined();
@@ -204,7 +235,7 @@ describe('ReactIncrementalReflection', () => {
     // Flush next step which will cause an update but not yet render a new host
     // node.
     ReactNoop.render(<Foo step={1} />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       ['componentWillUpdate', hostSpan],
       'render',
       'render sibling',
@@ -215,10 +246,14 @@ describe('ReactIncrementalReflection', () => {
 
     // The next step will render a new host node but won't get committed yet.
     // We expect this to mutate the original Fiber.
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Foo step={2} />);
+      });
+    } else {
       ReactNoop.render(<Foo step={2} />);
-    });
-    await waitFor([
+    }
+    expect(Scheduler).toFlushAndYieldThrough([
       ['componentWillUpdate', hostSpan],
       'render',
       'render sibling',
@@ -228,7 +263,7 @@ describe('ReactIncrementalReflection', () => {
     expect(ReactNoop.findInstance(classInstance)).toBe(hostSpan);
 
     // When we finally flush the tree it will get committed.
-    await waitForAll([['componentDidUpdate', div()]]);
+    expect(Scheduler).toFlushAndYield([['componentDidUpdate', div()]]);
 
     const hostDiv = classInstance.div;
     expect(hostDiv).toBeDefined();
@@ -238,10 +273,14 @@ describe('ReactIncrementalReflection', () => {
     expect(ReactNoop.findInstance(classInstance)).toBe(hostDiv);
 
     // Render to null but don't commit it yet.
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Foo step={3} />);
+      });
+    } else {
       ReactNoop.render(<Foo step={3} />);
-    });
-    await waitFor([
+    }
+    expect(Scheduler).toFlushAndYieldThrough([
       ['componentWillUpdate', hostDiv],
       'render',
       'render sibling',
@@ -250,14 +289,14 @@ describe('ReactIncrementalReflection', () => {
     // This should still be the host div since the deletion is not committed.
     expect(ReactNoop.findInstance(classInstance)).toBe(hostDiv);
 
-    await waitForAll([['componentDidUpdate', null]]);
+    expect(Scheduler).toFlushAndYield([['componentDidUpdate', null]]);
 
     // This should still be the host div since the deletion is not committed.
     expect(ReactNoop.findInstance(classInstance)).toBe(null);
 
     // Render a div again
     ReactNoop.render(<Foo step={4} />);
-    await waitForAll([
+    expect(Scheduler).toFlushAndYield([
       ['componentWillUpdate', null],
       'render',
       'render sibling',
@@ -266,6 +305,6 @@ describe('ReactIncrementalReflection', () => {
 
     // Unmount the component.
     ReactNoop.render([]);
-    await waitForAll([['componentWillUnmount', hostDiv]]);
+    expect(Scheduler).toFlushAndYield([['componentWillUnmount', hostDiv]]);
   });
 });

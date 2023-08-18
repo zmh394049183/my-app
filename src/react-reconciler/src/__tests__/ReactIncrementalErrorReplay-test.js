@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,26 +12,22 @@
 
 let React;
 let ReactNoop;
-let waitForAll;
-let waitForThrow;
+let Scheduler;
 
 describe('ReactIncrementalErrorReplay', () => {
   beforeEach(() => {
     jest.resetModules();
     React = require('react');
     ReactNoop = require('react-noop-renderer');
-
-    const InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
-    waitForThrow = InternalTestUtils.waitForThrow;
+    Scheduler = require('scheduler');
   });
 
-  it('should fail gracefully on error in the host environment', async () => {
+  it('should fail gracefully on error in the host environment', () => {
     ReactNoop.render(<errorInBeginPhase />);
-    await waitForThrow('Error in host config.');
+    expect(Scheduler).toFlushAndThrow('Error in host config.');
   });
 
-  it("should ignore error if it doesn't throw on retry", async () => {
+  it("should ignore error if it doesn't throw on retry", () => {
     let didInit = false;
 
     function badLazyInit() {
@@ -49,6 +45,6 @@ describe('ReactIncrementalErrorReplay', () => {
       }
     }
     ReactNoop.render(<App />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
   });
 });

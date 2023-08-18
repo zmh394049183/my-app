@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -15,8 +15,6 @@ let ReactDOM;
 let ReactDOMClient;
 let Scheduler;
 let act;
-let assertLog;
-let waitFor;
 
 describe('ReactDOMNativeEventHeuristic-test', () => {
   let container;
@@ -28,11 +26,7 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
     ReactDOM = require('react-dom');
     ReactDOMClient = require('react-dom/client');
     Scheduler = require('scheduler');
-    act = require('internal-test-utils').act;
-
-    const InternalTestUtils = require('internal-test-utils');
-    assertLog = InternalTestUtils.assertLog;
-    waitFor = InternalTestUtils.waitFor;
+    act = require('jest-react').act;
 
     document.body.appendChild(container);
   });
@@ -82,13 +76,13 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
     expect(disableButton.tagName).toBe('BUTTON');
 
     // Dispatch a click event on the Disable-button.
-    await act(async () => {
-      const firstEvent = document.createEvent('Event');
-      firstEvent.initEvent('click', true, true);
-      dispatchAndSetCurrentEvent(disableButton, firstEvent);
-    });
+    const firstEvent = document.createEvent('Event');
+    firstEvent.initEvent('click', true, true);
+    dispatchAndSetCurrentEvent(disableButton, firstEvent);
+
     // Discrete events should be flushed in a microtask.
     // Verify that the second button was removed.
+    await null;
     expect(submitButtonRef.current).toBe(null);
     // We'll assume that the browser won't let the user click it.
   });
@@ -130,8 +124,9 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
     }
 
     const root = ReactDOMClient.createRoot(container);
+    root.render(<Form />);
     // Flush
-    await act(() => root.render(<Form />));
+    Scheduler.unstable_flushAll();
 
     const disableButton = disableButtonRef.current;
     expect(disableButton.tagName).toBe('BUTTON');
@@ -139,22 +134,20 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
     // Dispatch a click event on the Disable-button.
     const firstEvent = document.createEvent('Event');
     firstEvent.initEvent('click', true, true);
-    await act(() => {
-      dispatchAndSetCurrentEvent(disableButton, firstEvent);
+    dispatchAndSetCurrentEvent(disableButton, firstEvent);
 
-      // There should now be a pending update to disable the form.
-      // This should not have flushed yet since it's in concurrent mode.
-      const submitButton = submitButtonRef.current;
-      expect(submitButton.tagName).toBe('BUTTON');
+    // There should now be a pending update to disable the form.
+    // This should not have flushed yet since it's in concurrent mode.
+    const submitButton = submitButtonRef.current;
+    expect(submitButton.tagName).toBe('BUTTON');
 
-      // Flush the discrete event
-      ReactDOM.flushSync();
+    // Discrete events should be flushed in a microtask.
+    await null;
 
-      // Now let's dispatch an event on the submit button.
-      const secondEvent = document.createEvent('Event');
-      secondEvent.initEvent('click', true, true);
-      dispatchAndSetCurrentEvent(submitButton, secondEvent);
-    });
+    // Now let's dispatch an event on the submit button.
+    const secondEvent = document.createEvent('Event');
+    secondEvent.initEvent('click', true, true);
+    dispatchAndSetCurrentEvent(submitButton, secondEvent);
 
     // Therefore the form should never have been submitted.
     expect(formSubmitted).toBe(false);
@@ -191,30 +184,30 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
     }
 
     const root = ReactDOMClient.createRoot(container);
-    await act(() => root.render(<Form />));
+    root.render(<Form />);
+    // Flush
+    Scheduler.unstable_flushAll();
 
     const enableButton = enableButtonRef.current;
     expect(enableButton.tagName).toBe('BUTTON');
 
     // Dispatch a click event on the Enable-button.
-    await act(() => {
-      const firstEvent = document.createEvent('Event');
-      firstEvent.initEvent('click', true, true);
-      dispatchAndSetCurrentEvent(enableButton, firstEvent);
+    const firstEvent = document.createEvent('Event');
+    firstEvent.initEvent('click', true, true);
+    dispatchAndSetCurrentEvent(enableButton, firstEvent);
 
-      // There should now be a pending update to enable the form.
-      // This should not have flushed yet since it's in concurrent mode.
-      const submitButton = submitButtonRef.current;
-      expect(submitButton.tagName).toBe('BUTTON');
+    // There should now be a pending update to enable the form.
+    // This should not have flushed yet since it's in concurrent mode.
+    const submitButton = submitButtonRef.current;
+    expect(submitButton.tagName).toBe('BUTTON');
 
-      // Flush discrete updates
-      ReactDOM.flushSync();
+    // Discrete events should be flushed in a microtask.
+    await null;
 
-      // Now let's dispatch an event on the submit button.
-      const secondEvent = document.createEvent('Event');
-      secondEvent.initEvent('click', true, true);
-      dispatchAndSetCurrentEvent(submitButton, secondEvent);
-    });
+    // Now let's dispatch an event on the submit button.
+    const secondEvent = document.createEvent('Event');
+    secondEvent.initEvent('click', true, true);
+    dispatchAndSetCurrentEvent(submitButton, secondEvent);
 
     // Therefore the form should have been submitted.
     expect(formSubmitted).toBe(true);
@@ -232,12 +225,12 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
       return <div ref={target}>{isHover ? 'hovered' : 'not hovered'}</div>;
     }
 
-    await act(() => {
+    await act(async () => {
       root.render(<Foo />);
     });
     expect(container.textContent).toEqual('not hovered');
 
-    await act(() => {
+    await act(async () => {
       const mouseOverEvent = document.createEvent('MouseEvents');
       mouseOverEvent.initEvent('mouseover', true, true);
       dispatchAndSetCurrentEvent(target.current, mouseOverEvent);
@@ -262,12 +255,12 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
       return <div ref={target}>{isHover ? 'hovered' : 'not hovered'}</div>;
     }
 
-    await act(() => {
+    await act(async () => {
       root.render(<Foo />);
     });
     expect(container.textContent).toEqual('not hovered');
 
-    await act(() => {
+    await act(async () => {
       // Note: React does not use native mouseenter/mouseleave events
       // but we should still correctly determine their priority.
       const mouseEnterEvent = document.createEvent('MouseEvents');
@@ -288,11 +281,11 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
     const target = React.createRef(null);
     function Foo({hovered}) {
       const hoverString = hovered ? 'hovered' : 'not hovered';
-      Scheduler.log(hoverString);
+      Scheduler.unstable_yieldValue(hoverString);
       return <div ref={target}>{hoverString}</div>;
     }
 
-    await act(() => {
+    await act(async () => {
       root.render(<Foo hovered={false} />);
     });
     expect(container.textContent).toEqual('not hovered');
@@ -308,14 +301,14 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
       dispatchAndSetCurrentEvent(target.current, mouseEnterEvent);
 
       // Since mouse end is not discrete, should not have updated yet
-      assertLog(['not hovered']);
+      expect(Scheduler).toHaveYielded(['not hovered']);
       expect(container.textContent).toEqual('not hovered');
 
-      await waitFor(['hovered']);
-      if (gate(flags => flags.forceConcurrentByDefaultForTesting)) {
-        expect(container.textContent).toEqual('not hovered');
-      } else {
+      expect(Scheduler).toFlushAndYieldThrough(['hovered']);
+      if (gate(flags => flags.enableSyncDefaultUpdates)) {
         expect(container.textContent).toEqual('hovered');
+      } else {
+        expect(container.textContent).toEqual('not hovered');
       }
     });
     expect(container.textContent).toEqual('hovered');
@@ -342,16 +335,17 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
       return <div ref={target}>Count: {count}</div>;
     }
 
-    await act(() => {
+    await act(async () => {
       root.render(<Foo />);
     });
     expect(container.textContent).toEqual('Count: 0');
 
-    await act(async () => {
-      const pressEvent = document.createEvent('Event');
-      pressEvent.initEvent('click', true, true);
-      dispatchAndSetCurrentEvent(target.current, pressEvent);
-    });
+    const pressEvent = document.createEvent('Event');
+    pressEvent.initEvent('click', true, true);
+    dispatchAndSetCurrentEvent(target.current, pressEvent);
+    // Intentionally not using `act` so we can observe in between the press
+    // event and the microtask, without batching.
+    await null;
     // If this is 2, that means the `setCount` calls were not batched.
     expect(container.textContent).toEqual('Count: 1');
   });
@@ -371,7 +365,7 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
                 ReactDOM.unstable_batchedUpdates(() => {
                   setCount(count + 1);
                 });
-                Scheduler.log(
+                Scheduler.unstable_yieldValue(
                   container.textContent + ' [after batchedUpdates]',
                 );
               };
@@ -382,18 +376,22 @@ describe('ReactDOMNativeEventHeuristic-test', () => {
       );
     }
 
-    await act(() => {
+    await act(async () => {
       root.render(<Foo />);
     });
     expect(container.textContent).toEqual('Count: 0');
 
-    await act(async () => {
-      const pressEvent = document.createEvent('Event');
-      pressEvent.initEvent('click', true, true);
-      dispatchAndSetCurrentEvent(target, pressEvent);
-      assertLog(['Count: 0 [after batchedUpdates]']);
-      expect(container.textContent).toEqual('Count: 0');
-    });
+    const pressEvent = document.createEvent('Event');
+    pressEvent.initEvent('click', true, true);
+    dispatchAndSetCurrentEvent(target, pressEvent);
+
+    expect(Scheduler).toHaveYielded(['Count: 0 [after batchedUpdates]']);
+    expect(container.textContent).toEqual('Count: 0');
+
+    // Intentionally not using `act` so we can observe in between the click
+    // event and the microtask, without batching.
+    await null;
+
     expect(container.textContent).toEqual('Count: 1');
   });
 });

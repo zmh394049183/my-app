@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -18,9 +18,8 @@ let Scheduler;
 let act;
 let useEffect;
 let useLayoutEffect;
-let assertLog;
 
-describe('ReactEffectOrdering', () => {
+describe('ReactHooksWithNoopRenderer', () => {
   beforeEach(() => {
     jest.resetModules();
     jest.useFakeTimers();
@@ -28,12 +27,9 @@ describe('ReactEffectOrdering', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('internal-test-utils').act;
+    act = require('jest-react').act;
     useEffect = React.useEffect;
     useLayoutEffect = React.useLayoutEffect;
-
-    const InternalTestUtils = require('internal-test-utils');
-    assertLog = InternalTestUtils.assertLog;
   });
 
   test('layout unmounts on deletion are fired in parent -> child order', async () => {
@@ -41,26 +37,26 @@ describe('ReactEffectOrdering', () => {
 
     function Parent() {
       useLayoutEffect(() => {
-        return () => Scheduler.log('Unmount parent');
+        return () => Scheduler.unstable_yieldValue('Unmount parent');
       });
       return <Child />;
     }
 
     function Child() {
       useLayoutEffect(() => {
-        return () => Scheduler.log('Unmount child');
+        return () => Scheduler.unstable_yieldValue('Unmount child');
       });
       return 'Child';
     }
 
-    await act(() => {
+    await act(async () => {
       root.render(<Parent />);
     });
     expect(root).toMatchRenderedOutput('Child');
-    await act(() => {
+    await act(async () => {
       root.render(null);
     });
-    assertLog(['Unmount parent', 'Unmount child']);
+    expect(Scheduler).toHaveYielded(['Unmount parent', 'Unmount child']);
   });
 
   test('passive unmounts on deletion are fired in parent -> child order', async () => {
@@ -68,25 +64,25 @@ describe('ReactEffectOrdering', () => {
 
     function Parent() {
       useEffect(() => {
-        return () => Scheduler.log('Unmount parent');
+        return () => Scheduler.unstable_yieldValue('Unmount parent');
       });
       return <Child />;
     }
 
     function Child() {
       useEffect(() => {
-        return () => Scheduler.log('Unmount child');
+        return () => Scheduler.unstable_yieldValue('Unmount child');
       });
       return 'Child';
     }
 
-    await act(() => {
+    await act(async () => {
       root.render(<Parent />);
     });
     expect(root).toMatchRenderedOutput('Child');
-    await act(() => {
+    await act(async () => {
       root.render(null);
     });
-    assertLog(['Unmount parent', 'Unmount child']);
+    expect(Scheduler).toHaveYielded(['Unmount parent', 'Unmount child']);
   });
 });

@@ -1,10 +1,8 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
- *
- * @noflow
  */
 
 import {REACT_MEMO_TYPE} from 'shared/ReactSymbols';
@@ -34,10 +32,10 @@ export function memo<Props>(
     Object.defineProperty(elementType, 'displayName', {
       enumerable: false,
       configurable: true,
-      get: function () {
+      get: function() {
         return ownName;
       },
-      set: function (name) {
+      set: function(name) {
         ownName = name;
 
         // The inner component shouldn't inherit this display name in most cases,

@@ -1,11 +1,10 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  *
  * @emails react-core
- * @jest-environment ./scripts/jest/ReactDOMServerIntegrationEnvironment
  */
 
 'use strict';
@@ -19,12 +18,12 @@ let ReactTestUtils;
 let forwardRef;
 let memo;
 let yieldedValues;
-let log;
-let clearLog;
+let unstable_yieldValue;
+let clearYields;
 
 function initModules() {
   // Reset warning cache.
-  jest.resetModules();
+  jest.resetModuleRegistry();
   React = require('react');
   ReactDOM = require('react-dom');
   ReactDOMServer = require('react-dom/server');
@@ -33,10 +32,10 @@ function initModules() {
   memo = React.memo;
 
   yieldedValues = [];
-  log = value => {
+  unstable_yieldValue = value => {
     yieldedValues.push(value);
   };
-  clearLog = () => {
+  clearYields = () => {
     const ret = yieldedValues;
     yieldedValues = [];
     return ret;
@@ -93,7 +92,7 @@ describe('ReactDOMServerIntegration', () => {
     });
 
     function Text({text}) {
-      log(text);
+      unstable_yieldValue(text);
       return <span>{text}</span>;
     }
 
@@ -115,25 +114,27 @@ describe('ReactDOMServerIntegration', () => {
       ref.current = 0;
       await render(<MemoRefCounter ref={ref} />);
 
-      expect(clearLog()).toEqual(['Count: 0']);
+      expect(clearYields()).toEqual(['Count: 0']);
     });
 
     itRenders('with comparator', async render => {
       const MemoCounter = memo(Counter, (oldProps, newProps) => false);
       await render(<MemoCounter count={0} />);
-      expect(clearLog()).toEqual(['Count: 0']);
+      expect(clearYields()).toEqual(['Count: 0']);
     });
 
     itRenders(
       'comparator functions are not invoked on the server',
       async render => {
         const MemoCounter = React.memo(Counter, (oldProps, newProps) => {
-          log(`Old count: ${oldProps.count}, New count: ${newProps.count}`);
+          unstable_yieldValue(
+            `Old count: ${oldProps.count}, New count: ${newProps.count}`,
+          );
           return oldProps.count === newProps.count;
         });
 
         await render(<MemoCounter count={0} />);
-        expect(clearLog()).toEqual(['Count: 0']);
+        expect(clearYields()).toEqual(['Count: 0']);
       },
     );
   });

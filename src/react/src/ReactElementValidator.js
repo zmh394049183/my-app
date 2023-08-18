@@ -1,12 +1,12 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
  */
 
 /**
- * ReactElementValidator provides a wrapper around an element factory
+ * ReactElementValidator provides a wrapper around a element factory
  * which validates the props passed to the element. This is intended to be
  * used only in DEV and could be replaced by a static type checker for languages
  * that support it.
@@ -21,6 +21,7 @@ import {
   REACT_FRAGMENT_TYPE,
   REACT_ELEMENT_TYPE,
 } from 'shared/ReactSymbols';
+import {warnAboutSpreadingKeyToJSX} from 'shared/ReactFeatureFlags';
 import checkPropTypes from 'shared/checkPropTypes';
 import isArray from 'shared/isArray';
 
@@ -34,8 +35,6 @@ import {
 import {setExtraStackFrame} from './ReactDebugCurrentFrame';
 import {describeUnknownElementTypeFrameInDEV} from 'shared/ReactComponentStackFrame';
 import hasOwnProperty from 'shared/hasOwnProperty';
-
-const REACT_CLIENT_REFERENCE = Symbol.for('react.client.reference');
 
 function setCurrentlyValidatingElement(element) {
   if (__DEV__) {
@@ -167,12 +166,10 @@ function validateExplicitKey(element, parentType) {
  * @param {*} parentType node's parent's type.
  */
 function validateChildKeys(node, parentType) {
-  if (typeof node !== 'object' || !node) {
+  if (typeof node !== 'object') {
     return;
   }
-  if (node.$$typeof === REACT_CLIENT_REFERENCE) {
-    // This is a reference to a client component so it's unknown.
-  } else if (isArray(node)) {
+  if (isArray(node)) {
     for (let i = 0; i < node.length; i++) {
       const child = node[i];
       if (isValidElement(child)) {
@@ -184,7 +181,7 @@ function validateChildKeys(node, parentType) {
     if (node._store) {
       node._store.validated = true;
     }
-  } else {
+  } else if (node) {
     const iteratorFn = getIteratorFn(node);
     if (typeof iteratorFn === 'function') {
       // Entry iterators used to provide implicit keys,
@@ -212,9 +209,6 @@ function validatePropTypes(element) {
   if (__DEV__) {
     const type = element.type;
     if (type === null || type === undefined || typeof type === 'string') {
-      return;
-    }
-    if (type.$$typeof === REACT_CLIENT_REFERENCE) {
       return;
     }
     let propTypes;
@@ -285,8 +279,6 @@ function validateFragmentProps(fragment) {
   }
 }
 
-const didWarnAboutKeySpread = {};
-
 export function jsxWithValidation(
   type,
   props,
@@ -295,128 +287,115 @@ export function jsxWithValidation(
   source,
   self,
 ) {
-  if (__DEV__) {
-    const validType = isValidElementType(type);
+  const validType = isValidElementType(type);
 
-    // We warn in this case but don't throw. We expect the element creation to
-    // succeed and there will likely be errors in render.
-    if (!validType) {
-      let info = '';
-      if (
-        type === undefined ||
-        (typeof type === 'object' &&
-          type !== null &&
-          Object.keys(type).length === 0)
-      ) {
-        info +=
-          ' You likely forgot to export your component from the file ' +
-          "it's defined in, or you might have mixed up default and named imports.";
-      }
-
-      const sourceInfo = getSourceInfoErrorAddendum(source);
-      if (sourceInfo) {
-        info += sourceInfo;
-      } else {
-        info += getDeclarationErrorAddendum();
-      }
-
-      let typeString;
-      if (type === null) {
-        typeString = 'null';
-      } else if (isArray(type)) {
-        typeString = 'array';
-      } else if (type !== undefined && type.$$typeof === REACT_ELEMENT_TYPE) {
-        typeString = `<${getComponentNameFromType(type.type) || 'Unknown'} />`;
-        info =
-          ' Did you accidentally export a JSX literal instead of a component?';
-      } else {
-        typeString = typeof type;
-      }
-
-      if (__DEV__) {
-        console.error(
-          'React.jsx: type is invalid -- expected a string (for ' +
-            'built-in components) or a class/function (for composite ' +
-            'components) but got: %s.%s',
-          typeString,
-          info,
-        );
-      }
+  // We warn in this case but don't throw. We expect the element creation to
+  // succeed and there will likely be errors in render.
+  if (!validType) {
+    let info = '';
+    if (
+      type === undefined ||
+      (typeof type === 'object' &&
+        type !== null &&
+        Object.keys(type).length === 0)
+    ) {
+      info +=
+        ' You likely forgot to export your component from the file ' +
+        "it's defined in, or you might have mixed up default and named imports.";
     }
 
-    const element = jsxDEV(type, props, key, source, self);
-
-    // The result can be nullish if a mock or a custom function is used.
-    // TODO: Drop this when these are no longer allowed as the type argument.
-    if (element == null) {
-      return element;
+    const sourceInfo = getSourceInfoErrorAddendum(source);
+    if (sourceInfo) {
+      info += sourceInfo;
+    } else {
+      info += getDeclarationErrorAddendum();
     }
 
-    // Skip key warning if the type isn't valid since our key validation logic
-    // doesn't expect a non-string/function type and can throw confusing errors.
-    // We don't want exception behavior to differ between dev and prod.
-    // (Rendering will throw with a helpful message and as soon as the type is
-    // fixed, the key warnings will appear.)
+    let typeString;
+    if (type === null) {
+      typeString = 'null';
+    } else if (isArray(type)) {
+      typeString = 'array';
+    } else if (type !== undefined && type.$$typeof === REACT_ELEMENT_TYPE) {
+      typeString = `<${getComponentNameFromType(type.type) || 'Unknown'} />`;
+      info =
+        ' Did you accidentally export a JSX literal instead of a component?';
+    } else {
+      typeString = typeof type;
+    }
 
-    if (validType) {
-      const children = props.children;
-      if (children !== undefined) {
-        if (isStaticChildren) {
-          if (isArray(children)) {
-            for (let i = 0; i < children.length; i++) {
-              validateChildKeys(children[i], type);
-            }
+    if (__DEV__) {
+      console.error(
+        'React.jsx: type is invalid -- expected a string (for ' +
+          'built-in components) or a class/function (for composite ' +
+          'components) but got: %s.%s',
+        typeString,
+        info,
+      );
+    }
+  }
 
-            if (Object.freeze) {
-              Object.freeze(children);
-            }
-          } else {
+  const element = jsxDEV(type, props, key, source, self);
+
+  // The result can be nullish if a mock or a custom function is used.
+  // TODO: Drop this when these are no longer allowed as the type argument.
+  if (element == null) {
+    return element;
+  }
+
+  // Skip key warning if the type isn't valid since our key validation logic
+  // doesn't expect a non-string/function type and can throw confusing errors.
+  // We don't want exception behavior to differ between dev and prod.
+  // (Rendering will throw with a helpful message and as soon as the type is
+  // fixed, the key warnings will appear.)
+
+  if (validType) {
+    const children = props.children;
+    if (children !== undefined) {
+      if (isStaticChildren) {
+        if (isArray(children)) {
+          for (let i = 0; i < children.length; i++) {
+            validateChildKeys(children[i], type);
+          }
+
+          if (Object.freeze) {
+            Object.freeze(children);
+          }
+        } else {
+          if (__DEV__) {
             console.error(
               'React.jsx: Static children should always be an array. ' +
                 'You are likely explicitly calling React.jsxs or React.jsxDEV. ' +
                 'Use the Babel transform instead.',
             );
           }
-        } else {
-          validateChildKeys(children, type);
         }
+      } else {
+        validateChildKeys(children, type);
       }
     }
-
-    if (hasOwnProperty.call(props, 'key')) {
-      const componentName = getComponentNameFromType(type);
-      const keys = Object.keys(props).filter(k => k !== 'key');
-      const beforeExample =
-        keys.length > 0
-          ? '{key: someKey, ' + keys.join(': ..., ') + ': ...}'
-          : '{key: someKey}';
-      if (!didWarnAboutKeySpread[componentName + beforeExample]) {
-        const afterExample =
-          keys.length > 0 ? '{' + keys.join(': ..., ') + ': ...}' : '{}';
-        console.error(
-          'A props object containing a "key" prop is being spread into JSX:\n' +
-            '  let props = %s;\n' +
-            '  <%s {...props} />\n' +
-            'React keys must be passed directly to JSX without using spread:\n' +
-            '  let props = %s;\n' +
-            '  <%s key={someKey} {...props} />',
-          beforeExample,
-          componentName,
-          afterExample,
-          componentName,
-        );
-        didWarnAboutKeySpread[componentName + beforeExample] = true;
-      }
-    }
-
-    if (type === REACT_FRAGMENT_TYPE) {
-      validateFragmentProps(element);
-    } else {
-      validatePropTypes(element);
-    }
-
-    return element;
   }
+
+  if (__DEV__) {
+    if (warnAboutSpreadingKeyToJSX) {
+      if (hasOwnProperty.call(props, 'key')) {
+        console.error(
+          'React.jsx: Spreading a key to JSX is a deprecated pattern. ' +
+            'Explicitly pass a key after spreading props in your JSX call. ' +
+            'E.g. <%s {...props} key={key} />',
+          getComponentNameFromType(type) || 'ComponentName',
+        );
+      }
+    }
+  }
+
+  if (type === REACT_FRAGMENT_TYPE) {
+    validateFragmentProps(element);
+  } else {
+    validatePropTypes(element);
+  }
+
+  return element;
 }
 
 // These two functions exist to still get child warnings in dev
@@ -525,7 +504,7 @@ export function createFactoryWithValidation(type) {
     // Legacy hook: remove it
     Object.defineProperty(validatedFactory, 'type', {
       enumerable: false,
-      get: function () {
+      get: function() {
         console.warn(
           'Factory.type is deprecated. Access the class directly ' +
             'before passing it to createFactory.',

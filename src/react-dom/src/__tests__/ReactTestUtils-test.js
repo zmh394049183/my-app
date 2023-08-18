@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -9,6 +9,7 @@
 
 'use strict';
 
+import ReactShallowRenderer from 'react-test-renderer/shallow';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
 import * as ReactDOMServer from 'react-dom/server';
@@ -40,7 +41,9 @@ describe('ReactTestUtils', () => {
     MockedComponent.prototype.render = jest.fn();
 
     // Patch it up so it returns its children.
-    expect(() => ReactTestUtils.mockComponent(MockedComponent)).toWarnDev(
+    expect(() =>
+      ReactTestUtils.mockComponent(MockedComponent),
+    ).toWarnDev(
       'ReactTestUtils.mockComponent() is deprecated. ' +
         'Use shallow rendering or jest.mock() instead.\n\n' +
         'See https://reactjs.org/link/test-utils-mock-component for more information.',
@@ -186,7 +189,7 @@ describe('ReactTestUtils', () => {
     );
 
     const log = [];
-    ReactTestUtils.findAllInRenderedTree(tree, function (child) {
+    ReactTestUtils.findAllInRenderedTree(tree, function(child) {
       if (ReactTestUtils.isDOMComponent(child)) {
         log.push(ReactDOM.findDOMNode(child).textContent);
       }
@@ -208,7 +211,7 @@ describe('ReactTestUtils', () => {
       'textarea',
     ];
 
-    injectedDOMComponents.forEach(function (type) {
+    injectedDOMComponents.forEach(function(type) {
       const testComponent = ReactTestUtils.renderIntoDocument(
         React.createElement(type),
       );
@@ -219,17 +222,13 @@ describe('ReactTestUtils', () => {
     // Full-page components (html, head, body) can't be rendered into a div
     // directly...
     class Root extends React.Component {
-      htmlRef = React.createRef();
-      headRef = React.createRef();
-      bodyRef = React.createRef();
-
       render() {
         return (
-          <html ref={this.htmlRef}>
-            <head ref={this.headRef}>
+          <html ref="html">
+            <head ref="head">
               <title>hello</title>
             </head>
-            <body ref={this.bodyRef}>hello, world</body>
+            <body ref="body">hello, world</body>
           </html>
         );
       }
@@ -239,12 +238,12 @@ describe('ReactTestUtils', () => {
     const testDocument = getTestDocument(markup);
     const component = ReactDOM.hydrate(<Root />, testDocument);
 
-    expect(component.htmlRef.current.tagName).toBe('HTML');
-    expect(component.headRef.current.tagName).toBe('HEAD');
-    expect(component.bodyRef.current.tagName).toBe('BODY');
-    expect(ReactTestUtils.isDOMComponent(component.htmlRef.current)).toBe(true);
-    expect(ReactTestUtils.isDOMComponent(component.headRef.current)).toBe(true);
-    expect(ReactTestUtils.isDOMComponent(component.bodyRef.current)).toBe(true);
+    expect(component.refs.html.tagName).toBe('HTML');
+    expect(component.refs.head.tagName).toBe('HEAD');
+    expect(component.refs.body.tagName).toBe('BODY');
+    expect(ReactTestUtils.isDOMComponent(component.refs.html)).toBe(true);
+    expect(ReactTestUtils.isDOMComponent(component.refs.head)).toBe(true);
+    expect(ReactTestUtils.isDOMComponent(component.refs.body)).toBe(true);
   });
 
   it('can scry with stateless components involved', () => {
@@ -329,11 +328,11 @@ describe('ReactTestUtils', () => {
   describe('Simulate', () => {
     it('should change the value of an input field', () => {
       const obj = {
-        handler: function (e) {
+        handler: function(e) {
           e.persist();
         },
       };
-      spyOnDevAndProd(obj, 'handler');
+      spyOnDevAndProd(obj, 'handler').and.callThrough();
       const container = document.createElement('div');
       const node = ReactDOM.render(
         <input type="text" onChange={obj.handler} />,
@@ -350,13 +349,12 @@ describe('ReactTestUtils', () => {
 
     it('should change the value of an input field in a component', () => {
       class SomeComponent extends React.Component {
-        inputRef = React.createRef();
         render() {
           return (
             <div>
               <input
                 type="text"
-                ref={this.inputRef}
+                ref="input"
                 onChange={this.props.handleChange}
               />
             </div>
@@ -365,24 +363,66 @@ describe('ReactTestUtils', () => {
       }
 
       const obj = {
-        handler: function (e) {
+        handler: function(e) {
           e.persist();
         },
       };
-      spyOnDevAndProd(obj, 'handler');
+      spyOnDevAndProd(obj, 'handler').and.callThrough();
       const container = document.createElement('div');
       const instance = ReactDOM.render(
         <SomeComponent handleChange={obj.handler} />,
         container,
       );
 
-      const node = instance.inputRef.current;
+      const node = instance.refs.input;
       node.value = 'zebra';
       ReactTestUtils.Simulate.change(node);
 
       expect(obj.handler).toHaveBeenCalledWith(
         expect.objectContaining({target: node}),
       );
+    });
+
+    it('should throw when attempting to use a React element', () => {
+      class SomeComponent extends React.Component {
+        render() {
+          return <div onClick={this.props.handleClick}>hello, world.</div>;
+        }
+      }
+
+      const handler = jest.fn().mockName('spy');
+      const shallowRenderer = ReactShallowRenderer.createRenderer();
+      const result = shallowRenderer.render(
+        <SomeComponent handleClick={handler} />,
+      );
+
+      expect(() => ReactTestUtils.Simulate.click(result)).toThrowError(
+        'TestUtils.Simulate expected a DOM node as the first argument but received ' +
+          'a React element. Pass the DOM node you wish to simulate the event on instead. ' +
+          'Note that TestUtils.Simulate will not work if you are using shallow rendering.',
+      );
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('should throw when attempting to use a component instance', () => {
+      class SomeComponent extends React.Component {
+        render() {
+          return <div onClick={this.props.handleClick}>hello, world.</div>;
+        }
+      }
+
+      const handler = jest.fn().mockName('spy');
+      const container = document.createElement('div');
+      const instance = ReactDOM.render(
+        <SomeComponent handleClick={handler} />,
+        container,
+      );
+
+      expect(() => ReactTestUtils.Simulate.click(instance)).toThrowError(
+        'TestUtils.Simulate expected a DOM node as the first argument but received ' +
+          'a component instance. Pass the DOM node you wish to simulate the event on instead.',
+      );
+      expect(handler).not.toHaveBeenCalled();
     });
 
     it('should not warn when used with extra properties', () => {
@@ -462,20 +502,5 @@ describe('ReactTestUtils', () => {
 
     ReactTestUtils.renderIntoDocument(<Component />);
     expect(mockArgs.length).toEqual(0);
-  });
-  it('should find rendered component with type in document', () => {
-    class MyComponent extends React.Component {
-      render() {
-        return true;
-      }
-    }
-
-    const instance = ReactTestUtils.renderIntoDocument(<MyComponent />);
-    const renderedComponentType = ReactTestUtils.findRenderedComponentWithType(
-      instance,
-      MyComponent,
-    );
-
-    expect(renderedComponentType).toBe(instance);
   });
 });

@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -10,7 +10,6 @@
 import ReactVersion from 'shared/ReactVersion';
 
 import type {ReactNodeList} from 'shared/ReactTypes';
-import type {BootstrapScriptDescriptor} from 'react-dom-bindings/src/server/ReactFizzConfigDOM';
 
 import {
   createRequest,
@@ -20,10 +19,9 @@ import {
 } from 'react-server/src/ReactFizzServer';
 
 import {
-  createResources,
   createResponseState,
   createRootFormatContext,
-} from 'react-dom-bindings/src/server/ReactFizzConfigDOMLegacy';
+} from './ReactDOMServerLegacyFormatConfig';
 
 type ServerOptions = {
   identifierPrefix?: string,
@@ -38,20 +36,17 @@ function renderToStringImpl(
   options: void | ServerOptions,
   generateStaticMarkup: boolean,
   abortReason: string,
-  unstable_externalRuntimeSrc?: string | BootstrapScriptDescriptor,
 ): string {
   let didFatal = false;
   let fatalError = null;
   let result = '';
   const destination = {
-    // $FlowFixMe[missing-local-annot]
     push(chunk) {
       if (chunk !== null) {
         result += chunk;
       }
       return true;
     },
-    // $FlowFixMe[missing-local-annot]
     destroy(error) {
       didFatal = true;
       fatalError = error;
@@ -62,15 +57,11 @@ function renderToStringImpl(
   function onShellReady() {
     readyToStream = true;
   }
-  const resources = createResources();
   const request = createRequest(
     children,
-    resources,
     createResponseState(
-      resources,
       generateStaticMarkup,
       options ? options.identifierPrefix : undefined,
-      unstable_externalRuntimeSrc,
     ),
     createRootFormatContext(),
     Infinity,
@@ -79,14 +70,13 @@ function renderToStringImpl(
     onShellReady,
     undefined,
     undefined,
-    undefined,
   );
   startWork(request);
   // If anything suspended and is still pending, we'll abort it before writing.
   // That way we write only client-rendered boundaries from the start.
   abort(request, abortReason);
   startFlowing(request, destination);
-  if (didFatal && fatalError !== abortReason) {
+  if (didFatal) {
     throw fatalError;
   }
 

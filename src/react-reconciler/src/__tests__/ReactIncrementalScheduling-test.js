@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -14,10 +14,6 @@ let React;
 let ReactNoop;
 let Scheduler;
 let act;
-let waitForAll;
-let waitFor;
-let assertLog;
-let waitForPaint;
 
 describe('ReactIncrementalScheduling', () => {
   beforeEach(() => {
@@ -26,39 +22,37 @@ describe('ReactIncrementalScheduling', () => {
     React = require('react');
     ReactNoop = require('react-noop-renderer');
     Scheduler = require('scheduler');
-    act = require('internal-test-utils').act;
-
-    const InternalTestUtils = require('internal-test-utils');
-    waitForAll = InternalTestUtils.waitForAll;
-    waitFor = InternalTestUtils.waitFor;
-    assertLog = InternalTestUtils.assertLog;
-    waitForPaint = InternalTestUtils.waitForPaint;
+    act = require('jest-react').act;
   });
 
-  it('schedules and flushes deferred work', async () => {
-    ReactNoop.render(<span prop="1" />);
-    expect(ReactNoop).toMatchRenderedOutput(null);
+  function span(prop) {
+    return {type: 'span', children: [], prop, hidden: false};
+  }
 
-    await waitForAll([]);
+  it('schedules and flushes deferred work', () => {
+    ReactNoop.render(<span prop="1" />);
+    expect(ReactNoop.getChildren()).toEqual([]);
+
+    expect(Scheduler).toFlushWithoutYielding();
     expect(ReactNoop).toMatchRenderedOutput(<span prop="1" />);
   });
 
-  it('searches for work on other roots once the current root completes', async () => {
+  it('searches for work on other roots once the current root completes', () => {
     ReactNoop.renderToRootWithID(<span prop="a:1" />, 'a');
     ReactNoop.renderToRootWithID(<span prop="b:1" />, 'b');
     ReactNoop.renderToRootWithID(<span prop="c:1" />, 'c');
 
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
 
-    expect(ReactNoop.getChildrenAsJSX('a')).toEqual(<span prop="a:1" />);
-    expect(ReactNoop.getChildrenAsJSX('b')).toEqual(<span prop="b:1" />);
-    expect(ReactNoop.getChildrenAsJSX('c')).toEqual(<span prop="c:1" />);
+    expect(ReactNoop.getChildren('a')).toEqual([span('a:1')]);
+    expect(ReactNoop.getChildren('b')).toEqual([span('b:1')]);
+    expect(ReactNoop.getChildren('c')).toEqual([span('c:1')]);
   });
 
-  it('schedules top-level updates in order of priority', async () => {
+  it('schedules top-level updates in order of priority', () => {
     // Initial render.
     ReactNoop.render(<span prop={1} />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(ReactNoop).toMatchRenderedOutput(<span prop={1} />);
 
     ReactNoop.batchedUpdates(() => {
@@ -74,14 +68,14 @@ describe('ReactIncrementalScheduling', () => {
 
     // The terminal value should be the last update that was scheduled,
     // regardless of priority. In this case, that's the last sync update.
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(ReactNoop).toMatchRenderedOutput(<span prop={4} />);
   });
 
-  it('schedules top-level updates with same priority in order of insertion', async () => {
+  it('schedules top-level updates with same priority in order of insertion', () => {
     // Initial render.
     ReactNoop.render(<span prop={1} />);
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(ReactNoop).toMatchRenderedOutput(<span prop={1} />);
 
     ReactNoop.render(<span prop={2} />);
@@ -89,84 +83,95 @@ describe('ReactIncrementalScheduling', () => {
     ReactNoop.render(<span prop={4} />);
     ReactNoop.render(<span prop={5} />);
 
-    await waitForAll([]);
+    expect(Scheduler).toFlushWithoutYielding();
     expect(ReactNoop).toMatchRenderedOutput(<span prop={5} />);
   });
 
-  it('works on deferred roots in the order they were scheduled', async () => {
+  it('works on deferred roots in the order they were scheduled', () => {
     const {useEffect} = React;
     function Text({text}) {
       useEffect(() => {
-        Scheduler.log(text);
+        Scheduler.unstable_yieldValue(text);
       }, [text]);
       return text;
     }
 
-    await act(() => {
+    act(() => {
       ReactNoop.renderToRootWithID(<Text text="a:1" />, 'a');
       ReactNoop.renderToRootWithID(<Text text="b:1" />, 'b');
       ReactNoop.renderToRootWithID(<Text text="c:1" />, 'c');
     });
-    assertLog(['a:1', 'b:1', 'c:1']);
+    expect(Scheduler).toHaveYielded(['a:1', 'b:1', 'c:1']);
 
     expect(ReactNoop.getChildrenAsJSX('a')).toEqual('a:1');
     expect(ReactNoop.getChildrenAsJSX('b')).toEqual('b:1');
     expect(ReactNoop.getChildrenAsJSX('c')).toEqual('c:1');
 
     // Schedule deferred work in the reverse order
-    await act(async () => {
-      React.startTransition(() => {
+    act(() => {
+      if (gate(flags => flags.enableSyncDefaultUpdates)) {
+        React.startTransition(() => {
+          ReactNoop.renderToRootWithID(<Text text="c:2" />, 'c');
+          ReactNoop.renderToRootWithID(<Text text="b:2" />, 'b');
+        });
+      } else {
         ReactNoop.renderToRootWithID(<Text text="c:2" />, 'c');
         ReactNoop.renderToRootWithID(<Text text="b:2" />, 'b');
-      });
+      }
       // Ensure it starts in the order it was scheduled
-      await waitFor(['c:2']);
+      expect(Scheduler).toFlushAndYieldThrough(['c:2']);
 
       expect(ReactNoop.getChildrenAsJSX('a')).toEqual('a:1');
       expect(ReactNoop.getChildrenAsJSX('b')).toEqual('b:1');
       expect(ReactNoop.getChildrenAsJSX('c')).toEqual('c:2');
       // Schedule last bit of work, it will get processed the last
 
-      React.startTransition(() => {
+      if (gate(flags => flags.enableSyncDefaultUpdates)) {
+        React.startTransition(() => {
+          ReactNoop.renderToRootWithID(<Text text="a:2" />, 'a');
+        });
+      } else {
         ReactNoop.renderToRootWithID(<Text text="a:2" />, 'a');
-      });
+      }
 
       // Keep performing work in the order it was scheduled
-      await waitFor(['b:2']);
+      expect(Scheduler).toFlushAndYieldThrough(['b:2']);
       expect(ReactNoop.getChildrenAsJSX('a')).toEqual('a:1');
       expect(ReactNoop.getChildrenAsJSX('b')).toEqual('b:2');
       expect(ReactNoop.getChildrenAsJSX('c')).toEqual('c:2');
 
-      await waitFor(['a:2']);
+      expect(Scheduler).toFlushAndYieldThrough(['a:2']);
       expect(ReactNoop.getChildrenAsJSX('a')).toEqual('a:2');
       expect(ReactNoop.getChildrenAsJSX('b')).toEqual('b:2');
       expect(ReactNoop.getChildrenAsJSX('c')).toEqual('c:2');
     });
   });
 
-  it('schedules sync updates when inside componentDidMount/Update', async () => {
+  it('schedules sync updates when inside componentDidMount/Update', () => {
     let instance;
 
     class Foo extends React.Component {
       state = {tick: 0};
 
       componentDidMount() {
-        Scheduler.log(
+        Scheduler.unstable_yieldValue(
           'componentDidMount (before setState): ' + this.state.tick,
         );
         this.setState({tick: 1});
         // We're in a batch. Update hasn't flushed yet.
-        Scheduler.log('componentDidMount (after setState): ' + this.state.tick);
+        Scheduler.unstable_yieldValue(
+          'componentDidMount (after setState): ' + this.state.tick,
+        );
       }
 
       componentDidUpdate() {
-        Scheduler.log('componentDidUpdate: ' + this.state.tick);
+        Scheduler.unstable_yieldValue('componentDidUpdate: ' + this.state.tick);
         if (this.state.tick === 2) {
-          Scheduler.log(
+          Scheduler.unstable_yieldValue(
             'componentDidUpdate (before setState): ' + this.state.tick,
           );
           this.setState({tick: 3});
-          Scheduler.log(
+          Scheduler.unstable_yieldValue(
             'componentDidUpdate (after setState): ' + this.state.tick,
           );
           // We're in a batch. Update hasn't flushed yet.
@@ -174,17 +179,21 @@ describe('ReactIncrementalScheduling', () => {
       }
 
       render() {
-        Scheduler.log('render: ' + this.state.tick);
+        Scheduler.unstable_yieldValue('render: ' + this.state.tick);
         instance = this;
         return <span prop={this.state.tick} />;
       }
     }
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Foo />);
+      });
+    } else {
       ReactNoop.render(<Foo />);
-    });
+    }
     // Render without committing
-    await waitFor(['render: 0']);
+    expect(Scheduler).toFlushAndYieldThrough(['render: 0']);
 
     // Do one more unit of work to commit
     expect(ReactNoop.flushNextYield()).toEqual([
@@ -196,10 +205,14 @@ describe('ReactIncrementalScheduling', () => {
       'componentDidUpdate: 1',
     ]);
 
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        instance.setState({tick: 2});
+      });
+    } else {
       instance.setState({tick: 2});
-    });
-    await waitFor(['render: 2']);
+    }
+    expect(Scheduler).toFlushAndYieldThrough(['render: 2']);
     expect(ReactNoop.flushNextYield()).toEqual([
       'componentDidUpdate: 2',
       'componentDidUpdate (before setState): 2',
@@ -211,18 +224,18 @@ describe('ReactIncrementalScheduling', () => {
     ]);
   });
 
-  it('can opt-in to async scheduling inside componentDidMount/Update', async () => {
+  it('can opt-in to async scheduling inside componentDidMount/Update', () => {
     let instance;
     class Foo extends React.Component {
       state = {tick: 0};
 
       componentDidMount() {
         React.startTransition(() => {
-          Scheduler.log(
+          Scheduler.unstable_yieldValue(
             'componentDidMount (before setState): ' + this.state.tick,
           );
           this.setState({tick: 1});
-          Scheduler.log(
+          Scheduler.unstable_yieldValue(
             'componentDidMount (after setState): ' + this.state.tick,
           );
         });
@@ -230,13 +243,15 @@ describe('ReactIncrementalScheduling', () => {
 
       componentDidUpdate() {
         React.startTransition(() => {
-          Scheduler.log('componentDidUpdate: ' + this.state.tick);
+          Scheduler.unstable_yieldValue(
+            'componentDidUpdate: ' + this.state.tick,
+          );
           if (this.state.tick === 2) {
-            Scheduler.log(
+            Scheduler.unstable_yieldValue(
               'componentDidUpdate (before setState): ' + this.state.tick,
             );
             this.setState({tick: 3});
-            Scheduler.log(
+            Scheduler.unstable_yieldValue(
               'componentDidUpdate (after setState): ' + this.state.tick,
             );
           }
@@ -244,7 +259,7 @@ describe('ReactIncrementalScheduling', () => {
       }
 
       render() {
-        Scheduler.log('render: ' + this.state.tick);
+        Scheduler.unstable_yieldValue('render: ' + this.state.tick);
         instance = this;
         return <span prop={this.state.tick} />;
       }
@@ -254,7 +269,7 @@ describe('ReactIncrementalScheduling', () => {
       ReactNoop.render(<Foo />);
     });
     // The cDM update should not have flushed yet because it has async priority.
-    assertLog([
+    expect(Scheduler).toHaveYielded([
       'render: 0',
       'componentDidMount (before setState): 0',
       'componentDidMount (after setState): 0',
@@ -262,14 +277,14 @@ describe('ReactIncrementalScheduling', () => {
     expect(ReactNoop).toMatchRenderedOutput(<span prop={0} />);
 
     // Now flush the cDM update.
-    await waitForAll(['render: 1', 'componentDidUpdate: 1']);
+    expect(Scheduler).toFlushAndYield(['render: 1', 'componentDidUpdate: 1']);
     expect(ReactNoop).toMatchRenderedOutput(<span prop={1} />);
 
     React.startTransition(() => {
       instance.setState({tick: 2});
     });
 
-    await waitForPaint([
+    expect(Scheduler).toFlushUntilNextPaint([
       'render: 2',
       'componentDidUpdate: 2',
       'componentDidUpdate (before setState): 2',
@@ -278,11 +293,11 @@ describe('ReactIncrementalScheduling', () => {
     expect(ReactNoop).toMatchRenderedOutput(<span prop={2} />);
 
     // Now flush the cDU update.
-    await waitForAll(['render: 3', 'componentDidUpdate: 3']);
+    expect(Scheduler).toFlushAndYield(['render: 3', 'componentDidUpdate: 3']);
     expect(ReactNoop).toMatchRenderedOutput(<span prop={3} />);
   });
 
-  it('performs Task work even after time runs out', async () => {
+  it('performs Task work even after time runs out', () => {
     class Foo extends React.Component {
       state = {step: 1};
       componentDidMount() {
@@ -295,17 +310,21 @@ describe('ReactIncrementalScheduling', () => {
         });
       }
       render() {
-        Scheduler.log('Foo');
+        Scheduler.unstable_yieldValue('Foo');
         return <span prop={this.state.step} />;
       }
     }
-    React.startTransition(() => {
+    if (gate(flags => flags.enableSyncDefaultUpdates)) {
+      React.startTransition(() => {
+        ReactNoop.render(<Foo />);
+      });
+    } else {
       ReactNoop.render(<Foo />);
-    });
+    }
 
     // This should be just enough to complete all the work, but not enough to
     // commit it.
-    await waitFor(['Foo']);
+    expect(Scheduler).toFlushAndYieldThrough(['Foo']);
     expect(ReactNoop).toMatchRenderedOutput(null);
 
     // Do one more unit of work.

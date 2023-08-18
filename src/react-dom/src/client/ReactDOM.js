@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -8,10 +8,7 @@
  */
 
 import type {ReactNodeList} from 'shared/ReactTypes';
-import type {
-  Container,
-  PublicInstance,
-} from 'react-dom-bindings/src/client/ReactFiberConfigDOM';
+import type {Container} from './ReactDOMHostConfig';
 import type {
   RootType,
   HydrateRootOptions,
@@ -30,49 +27,66 @@ import {
   hydrateRoot as hydrateRootImpl,
   isValidContainer,
 } from './ReactDOMRoot';
-import {createEventHandle} from 'react-dom-bindings/src/client/ReactDOMEventHandle';
+import {createEventHandle} from './ReactDOMEventHandle';
 
 import {
   batchedUpdates,
+  discreteUpdates,
   flushSync as flushSyncWithoutWarningIfAlreadyRendering,
   isAlreadyRendering,
+  flushControlled,
   injectIntoDevTools,
+  attemptSynchronousHydration,
+  attemptDiscreteHydration,
+  attemptContinuousHydration,
+  attemptHydrationAtCurrentPriority,
 } from 'react-reconciler/src/ReactFiberReconciler';
-import {runWithPriority} from 'react-reconciler/src/ReactEventPriorities';
+import {
+  runWithPriority,
+  getCurrentUpdatePriority,
+} from 'react-reconciler/src/ReactEventPriorities';
 import {createPortal as createPortalImpl} from 'react-reconciler/src/ReactPortal';
 import {canUseDOM} from 'shared/ExecutionEnvironment';
 import ReactVersion from 'shared/ReactVersion';
+import {enableNewReconciler} from 'shared/ReactFeatureFlags';
 
 import {
-  getClosestInstanceFromNode,
   getInstanceFromNode,
   getNodeFromInstance,
   getFiberCurrentPropsFromNode,
-} from 'react-dom-bindings/src/client/ReactDOMComponentTree';
+  getClosestInstanceFromNode,
+} from './ReactDOMComponentTree';
+import {restoreControlledState} from './ReactDOMComponent';
 import {
+  setAttemptSynchronousHydration,
+  setAttemptDiscreteHydration,
+  setAttemptContinuousHydration,
+  setAttemptHydrationAtCurrentPriority,
+  setGetCurrentUpdatePriority,
+  setAttemptHydrationAtPriority,
+} from '../events/ReactDOMEventReplaying';
+import {setBatchingImplementation} from '../events/ReactDOMUpdateBatching';
+import {
+  setRestoreImplementation,
   enqueueStateRestore,
   restoreStateIfNeeded,
-} from 'react-dom-bindings/src/events/ReactDOMControlledComponent';
-import Internals from '../ReactDOMSharedInternals';
+} from '../events/ReactDOMControlledComponent';
 
-export {
-  prefetchDNS,
-  preconnect,
-  preload,
-  preloadModule,
-  preinit,
-  preinitModule,
-} from '../shared/ReactDOMFloat';
-export {useFormStatus} from 'react-dom-bindings/src/shared/ReactDOMFormActions';
+setAttemptSynchronousHydration(attemptSynchronousHydration);
+setAttemptDiscreteHydration(attemptDiscreteHydration);
+setAttemptContinuousHydration(attemptContinuousHydration);
+setAttemptHydrationAtCurrentPriority(attemptHydrationAtCurrentPriority);
+setGetCurrentUpdatePriority(getCurrentUpdatePriority);
+setAttemptHydrationAtPriority(runWithPriority);
 
 if (__DEV__) {
   if (
     typeof Map !== 'function' ||
-    // $FlowFixMe[prop-missing] Flow incorrectly thinks Map has no prototype
+    // $FlowIssue Flow incorrectly thinks Map has no prototype
     Map.prototype == null ||
     typeof Map.prototype.forEach !== 'function' ||
     typeof Set !== 'function' ||
-    // $FlowFixMe[prop-missing] Flow incorrectly thinks Set has no prototype
+    // $FlowIssue Flow incorrectly thinks Set has no prototype
     Set.prototype == null ||
     typeof Set.prototype.clear !== 'function' ||
     typeof Set.prototype.forEach !== 'function'
@@ -84,6 +98,13 @@ if (__DEV__) {
   }
 }
 
+setRestoreImplementation(restoreControlledState);
+setBatchingImplementation(
+  batchedUpdates,
+  discreteUpdates,
+  flushSyncWithoutWarningIfAlreadyRendering,
+);
+
 function createPortal(
   children: ReactNodeList,
   container: Element | DocumentFragment,
@@ -94,7 +115,7 @@ function createPortal(
   }
 
   // TODO: pass ReactDOM portal implementation as third argument
-  // $FlowFixMe[incompatible-return] The Flow type is opaque but there's no way to actually create it.
+  // $FlowFixMe The Flow type is opaque but there's no way to actually create it.
   return createPortalImpl(children, container, null, key);
 }
 
@@ -103,7 +124,7 @@ function renderSubtreeIntoContainer(
   element: React$Element<any>,
   containerNode: Container,
   callback: ?Function,
-): React$Component<any, any> | PublicInstance | null {
+) {
   return unstable_renderSubtreeIntoContainer(
     parentComponent,
     element,
@@ -111,6 +132,20 @@ function renderSubtreeIntoContainer(
     callback,
   );
 }
+
+const Internals = {
+  usingClientEntryPoint: false,
+  // Keep in sync with ReactTestUtils.js.
+  // This is an array for better minification.
+  Events: [
+    getInstanceFromNode,
+    getNodeFromInstance,
+    getFiberCurrentPropsFromNode,
+    enqueueStateRestore,
+    restoreStateIfNeeded,
+    batchedUpdates,
+  ],
+};
 
 function createRoot(
   container: Element | Document | DocumentFragment,
@@ -149,7 +184,7 @@ declare function flushSync<R>(fn: () => R): R;
 // eslint-disable-next-line no-redeclare
 declare function flushSync(): void;
 // eslint-disable-next-line no-redeclare
-function flushSync<R>(fn: (() => R) | void): R | void {
+function flushSync(fn) {
   if (__DEV__) {
     if (isAlreadyRendering()) {
       console.error(
@@ -166,6 +201,7 @@ export {
   createPortal,
   batchedUpdates as unstable_batchedUpdates,
   flushSync,
+  Internals as __SECRET_INTERNALS_DO_NOT_USE_OR_YOU_WILL_BE_FIRED,
   ReactVersion as version,
   // Disabled behind disableLegacyReactDOMAPIs
   findDOMNode,
@@ -175,6 +211,7 @@ export {
   // exposeConcurrentModeAPIs
   createRoot,
   hydrateRoot,
+  flushControlled as unstable_flushControlled,
   // Disabled behind disableUnstableRenderSubtreeIntoContainer
   renderSubtreeIntoContainer as unstable_renderSubtreeIntoContainer,
   // enableCreateEventHandleAPI
@@ -183,17 +220,6 @@ export {
   // This should only be used by React internals.
   runWithPriority as unstable_runWithPriority,
 };
-
-// Keep in sync with ReactTestUtils.js.
-// This is an array for better minification.
-Internals.Events = [
-  getInstanceFromNode,
-  getNodeFromInstance,
-  getFiberCurrentPropsFromNode,
-  enqueueStateRestore,
-  restoreStateIfNeeded,
-  batchedUpdates,
-];
 
 const foundDevTools = injectIntoDevTools({
   findFiberByHostInstance: getClosestInstanceFromNode,
@@ -228,3 +254,5 @@ if (__DEV__) {
     }
   }
 }
+
+export const unstable_isNewReconciler = enableNewReconciler;

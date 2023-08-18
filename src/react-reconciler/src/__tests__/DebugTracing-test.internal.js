@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -12,14 +12,12 @@
 describe('DebugTracing', () => {
   let React;
   let ReactTestRenderer;
-  let waitForPaint;
-  let waitForAll;
+  let Scheduler;
 
   let logs;
 
-  const SYNC_LANE_STRING = '0b0000000000000000000000000000010';
-  const DEFAULT_LANE_STRING = '0b0000000000000000000000000100000';
-  const RETRY_LANE_STRING = '0b0000000100000000000000000000000';
+  const DEFAULT_LANE_STRING = '0b0000000000000000000000000010000';
+  const RETRY_LANE_STRING = '0b0000000010000000000000000000000';
 
   global.IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -28,22 +26,20 @@ describe('DebugTracing', () => {
 
     React = require('react');
     ReactTestRenderer = require('react-test-renderer');
-    const InternalTestUtils = require('internal-test-utils');
-    waitForPaint = InternalTestUtils.waitForPaint;
-    waitForAll = InternalTestUtils.waitForAll;
+    Scheduler = require('scheduler');
 
     logs = [];
 
     const groups = [];
 
-    spyOnDevAndProd(console, 'log').mockImplementation(message => {
+    spyOnDevAndProd(console, 'log').and.callFake(message => {
       logs.push(`log: ${message.replace(/%c/g, '')}`);
     });
-    spyOnDevAndProd(console, 'group').mockImplementation(message => {
+    spyOnDevAndProd(console, 'group').and.callFake(message => {
       logs.push(`group: ${message.replace(/%c/g, '')}`);
       groups.push(message);
     });
-    spyOnDevAndProd(console, 'groupEnd').mockImplementation(() => {
+    spyOnDevAndProd(console, 'groupEnd').and.callFake(() => {
       const message = groups.pop();
       logs.push(`groupEnd: ${message.replace(/%c/g, '')}`);
     });
@@ -75,20 +71,9 @@ describe('DebugTracing', () => {
 
   // @gate experimental && build === 'development' && enableDebugTracing
   it('should log sync render with suspense', async () => {
-    let resolveFakeSuspensePromise;
-    let didResolve = false;
-    const fakeSuspensePromise = new Promise(resolve => {
-      resolveFakeSuspensePromise = () => {
-        didResolve = true;
-        resolve();
-      };
-    });
-
+    const fakeSuspensePromise = Promise.resolve(true);
     function Example() {
-      if (!didResolve) {
-        throw fakeSuspensePromise;
-      }
-      return null;
+      throw fakeSuspensePromise;
     }
 
     ReactTestRenderer.act(() =>
@@ -102,21 +87,19 @@ describe('DebugTracing', () => {
     );
 
     expect(logs).toEqual([
-      `group: ⚛️ render (${SYNC_LANE_STRING})`,
+      'group: ⚛️ render (0b0000000000000000000000000000001)',
       'log: ⚛️ Example suspended',
-      `groupEnd: ⚛️ render (${SYNC_LANE_STRING})`,
+      'groupEnd: ⚛️ render (0b0000000000000000000000000000001)',
     ]);
 
     logs.splice(0);
 
-    resolveFakeSuspensePromise();
-    await waitForAll([]);
-
+    await fakeSuspensePromise;
     expect(logs).toEqual(['log: ⚛️ Example resolved']);
   });
 
   // @gate experimental && build === 'development' && enableDebugTracing && enableCPUSuspense
-  it('should log sync render with CPU suspense', async () => {
+  it('should log sync render with CPU suspense', () => {
     function Example() {
       console.log('<Example/>');
       return null;
@@ -138,14 +121,14 @@ describe('DebugTracing', () => {
     );
 
     expect(logs).toEqual([
-      `group: ⚛️ render (${SYNC_LANE_STRING})`,
+      'group: ⚛️ render (0b0000000000000000000000000000001)',
       'log: <Wrapper/>',
-      `groupEnd: ⚛️ render (${SYNC_LANE_STRING})`,
+      'groupEnd: ⚛️ render (0b0000000000000000000000000000001)',
     ]);
 
     logs.splice(0);
 
-    await waitForPaint([]);
+    expect(Scheduler).toFlushUntilNextPaint([]);
 
     expect(logs).toEqual([
       `group: ⚛️ render (${RETRY_LANE_STRING})`,
@@ -254,7 +237,7 @@ describe('DebugTracing', () => {
     expect(logs).toEqual([
       `group: ⚛️ commit (${DEFAULT_LANE_STRING})`,
       `group: ⚛️ layout effects (${DEFAULT_LANE_STRING})`,
-      `log: ⚛️ Example updated state (${SYNC_LANE_STRING})`,
+      'log: ⚛️ Example updated state (0b0000000000000000000000000000001)',
       `groupEnd: ⚛️ layout effects (${DEFAULT_LANE_STRING})`,
       `groupEnd: ⚛️ commit (${DEFAULT_LANE_STRING})`,
     ]);
@@ -312,7 +295,7 @@ describe('DebugTracing', () => {
     expect(logs).toEqual([
       `group: ⚛️ commit (${DEFAULT_LANE_STRING})`,
       `group: ⚛️ layout effects (${DEFAULT_LANE_STRING})`,
-      `log: ⚛️ Example updated state (${SYNC_LANE_STRING})`,
+      'log: ⚛️ Example updated state (0b0000000000000000000000000000001)',
       `groupEnd: ⚛️ layout effects (${DEFAULT_LANE_STRING})`,
       `groupEnd: ⚛️ commit (${DEFAULT_LANE_STRING})`,
     ]);
@@ -402,8 +385,7 @@ describe('DebugTracing', () => {
       return didMount;
     }
 
-    const fakeSuspensePromise = {then() {}};
-
+    const fakeSuspensePromise = new Promise(() => {});
     function ExampleThatSuspends() {
       throw fakeSuspensePromise;
     }

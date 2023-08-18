@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -41,7 +41,6 @@ function shallowEqual(objA: mixed, objB: mixed): boolean {
     const currentKey = keysA[i];
     if (
       !hasOwnProperty.call(objB, currentKey) ||
-      // $FlowFixMe[incompatible-use] lost refinement of `objB`
       !is(objA[currentKey], objB[currentKey])
     ) {
       return false;

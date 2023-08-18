@@ -1,5 +1,5 @@
 /**
- * Copyright (c) Meta Platforms, Inc. and affiliates.
+ * Copyright (c) Facebook, Inc. and its affiliates.
  *
  * This source code is licensed under the MIT license found in the
  * LICENSE file in the root directory of this source tree.
@@ -7,7 +7,7 @@
  * @flow
  */
 
-const loggedTypeFailures: {[string]: boolean} = {};
+const loggedTypeFailures = {};
 
 import {describeUnknownElementTypeFrameInDEV} from 'shared/ReactComponentStackFrame';
 
@@ -16,7 +16,7 @@ import hasOwnProperty from 'shared/hasOwnProperty';
 
 const ReactDebugCurrentFrame = ReactSharedInternals.ReactDebugCurrentFrame;
 
-function setCurrentlyValidatingElement(element: any) {
+function setCurrentlyValidatingElement(element) {
   if (__DEV__) {
     if (element) {
       const owner = element._owner;
@@ -40,7 +40,7 @@ export default function checkPropTypes(
   element?: any,
 ): void {
   if (__DEV__) {
-    // $FlowFixMe[incompatible-use] This is okay but Flow doesn't know it.
+    // $FlowFixMe This is okay but Flow doesn't know it.
     const has = Function.call.bind(hasOwnProperty);
     for (const typeSpecName in typeSpecs) {
       if (has(typeSpecs, typeSpecName)) {
